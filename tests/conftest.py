@@ -46,4 +46,6 @@ def base_inputs(t0: datetime) -> Inputs:
         forecast_tomorrow_kwh=15.0,
         energy_needed_kwh=1.5,             # small top-up
         cycle=CycleAccumulator(),
+        signal_on_at=None,
+        signal_currently_on=False,
     )

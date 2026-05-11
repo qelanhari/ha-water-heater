@@ -20,6 +20,9 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_BOOST_EXTRA_SURPLUS_W,
+    CONF_BOOST_TARGET_C,
+    CONF_ECO_TARGET_C,
     CONF_FORECAST_TODAY_ENTITY,
     CONF_FORECAST_TOMORROW_ENTITY,
     CONF_GARAGE_TEMP_ENTITY,
@@ -33,6 +36,7 @@ from .const import (
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_PV_POWER_ENTITY,
     CONF_ROUGE_HP_BLENDED_CAP,
+    CONF_SIGNAL_MIN_HOLD_MINUTES,
     CONF_SIGNAL_SWITCH_ENTITY,
     CONF_SOLAR_SMOOTH_ALPHA,
     CONF_SURPLUS_SAFETY_MARGIN_W,
@@ -44,10 +48,15 @@ from .const import (
     CONF_TEMPO_COLOR_ENTITY,
     CONF_TEMPO_IS_HC_ENTITY,
     CONF_TEMPO_NEXT_COLOR_ENTITY,
+    CONF_WATER_HEATER_ENTITY,
+    DEFAULT_BOOST_EXTRA_SURPLUS_W,
+    DEFAULT_BOOST_TARGET_C,
+    DEFAULT_ECO_TARGET_C,
     DEFAULT_MIN_DWELL_SECONDS,
     DEFAULT_MORNING_DEADLINE_HOUR,
     DEFAULT_MORNING_DEADLINE_MINUTE,
     DEFAULT_ROUGE_HP_BLENDED_CAP,
+    DEFAULT_SIGNAL_MIN_HOLD_MINUTES,
     DEFAULT_SOLAR_SMOOTH_ALPHA,
     DEFAULT_SURPLUS_SAFETY_MARGIN_W,
     DEFAULT_TANK_CAPACITY_L,
@@ -65,6 +74,7 @@ def _entities_schema(prev: dict[str, Any] | None = None) -> vol.Schema:
         return (vol.Required(key) if required else vol.Optional(key)), sel
     pairs = [
         opt(CONF_SIGNAL_SWITCH_ENTITY, EntitySelector(EntitySelectorConfig(domain="switch"))),
+        opt(CONF_WATER_HEATER_ENTITY, EntitySelector(EntitySelectorConfig(domain="water_heater"))),
         opt(CONF_TANK_TOP_TEMP_ENTITY, EntitySelector(EntitySelectorConfig(domain="sensor", device_class="temperature"))),
         opt(CONF_TANK_MIDDLE_TEMP_ENTITY, EntitySelector(EntitySelectorConfig(domain="sensor", device_class="temperature"))),
         opt(CONF_HEATER_POWER_ENTITY, EntitySelector(EntitySelectorConfig(domain="sensor", device_class="power"))),
@@ -92,6 +102,10 @@ def _tank_schema(prev: dict[str, Any] | None = None) -> vol.Schema:
             NumberSelector(NumberSelectorConfig(min=40, max=65, step=0.5, mode=NumberSelectorMode.BOX)),
         vol.Required(CONF_TANK_MORNING_FLOOR_C, default=p.get(CONF_TANK_MORNING_FLOOR_C, DEFAULT_TANK_MORNING_FLOOR_C)):
             NumberSelector(NumberSelectorConfig(min=35, max=55, step=0.5, mode=NumberSelectorMode.BOX)),
+        vol.Required(CONF_ECO_TARGET_C, default=p.get(CONF_ECO_TARGET_C, DEFAULT_ECO_TARGET_C)):
+            NumberSelector(NumberSelectorConfig(min=40, max=65, step=0.5, mode=NumberSelectorMode.BOX)),
+        vol.Required(CONF_BOOST_TARGET_C, default=p.get(CONF_BOOST_TARGET_C, DEFAULT_BOOST_TARGET_C)):
+            NumberSelector(NumberSelectorConfig(min=40, max=70, step=0.5, mode=NumberSelectorMode.BOX)),
         vol.Required(CONF_MORNING_DEADLINE_HOUR, default=p.get(CONF_MORNING_DEADLINE_HOUR, DEFAULT_MORNING_DEADLINE_HOUR)):
             NumberSelector(NumberSelectorConfig(min=0, max=23, step=1, mode=NumberSelectorMode.BOX)),
         vol.Required(CONF_MORNING_DEADLINE_MINUTE, default=p.get(CONF_MORNING_DEADLINE_MINUTE, DEFAULT_MORNING_DEADLINE_MINUTE)):
@@ -106,6 +120,10 @@ def _guardrails_schema(prev: dict[str, Any] | None = None) -> vol.Schema:
             NumberSelector(NumberSelectorConfig(min=0.05, max=0.3, step=0.001, mode=NumberSelectorMode.BOX)),
         vol.Required(CONF_SURPLUS_SAFETY_MARGIN_W, default=p.get(CONF_SURPLUS_SAFETY_MARGIN_W, DEFAULT_SURPLUS_SAFETY_MARGIN_W)):
             NumberSelector(NumberSelectorConfig(min=0, max=2000, step=10, mode=NumberSelectorMode.BOX)),
+        vol.Required(CONF_BOOST_EXTRA_SURPLUS_W, default=p.get(CONF_BOOST_EXTRA_SURPLUS_W, DEFAULT_BOOST_EXTRA_SURPLUS_W)):
+            NumberSelector(NumberSelectorConfig(min=0, max=3000, step=100, mode=NumberSelectorMode.BOX)),
+        vol.Required(CONF_SIGNAL_MIN_HOLD_MINUTES, default=p.get(CONF_SIGNAL_MIN_HOLD_MINUTES, DEFAULT_SIGNAL_MIN_HOLD_MINUTES)):
+            NumberSelector(NumberSelectorConfig(min=0, max=240, step=5, mode=NumberSelectorMode.BOX)),
         vol.Required(CONF_MIN_DWELL_SECONDS, default=p.get(CONF_MIN_DWELL_SECONDS, DEFAULT_MIN_DWELL_SECONDS)):
             NumberSelector(NumberSelectorConfig(min=0, max=600, step=10, mode=NumberSelectorMode.BOX)),
         vol.Required(CONF_SOLAR_SMOOTH_ALPHA, default=p.get(CONF_SOLAR_SMOOTH_ALPHA, DEFAULT_SOLAR_SMOOTH_ALPHA)):

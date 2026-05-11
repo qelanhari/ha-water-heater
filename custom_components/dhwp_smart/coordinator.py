@@ -15,6 +15,9 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
+    CONF_BOOST_EXTRA_SURPLUS_W,
+    CONF_BOOST_TARGET_C,
+    CONF_ECO_TARGET_C,
     CONF_FORECAST_TODAY_ENTITY,
     CONF_FORECAST_TOMORROW_ENTITY,
     CONF_GARAGE_TEMP_ENTITY,
@@ -28,6 +31,7 @@ from .const import (
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_PV_POWER_ENTITY,
     CONF_ROUGE_HP_BLENDED_CAP,
+    CONF_SIGNAL_MIN_HOLD_MINUTES,
     CONF_SIGNAL_SWITCH_ENTITY,
     CONF_SOLAR_SMOOTH_ALPHA,
     CONF_SURPLUS_SAFETY_MARGIN_W,
@@ -39,10 +43,15 @@ from .const import (
     CONF_TEMPO_COLOR_ENTITY,
     CONF_TEMPO_IS_HC_ENTITY,
     CONF_TEMPO_NEXT_COLOR_ENTITY,
+    CONF_WATER_HEATER_ENTITY,
+    DEFAULT_BOOST_EXTRA_SURPLUS_W,
+    DEFAULT_BOOST_TARGET_C,
+    DEFAULT_ECO_TARGET_C,
     DEFAULT_MIN_DWELL_SECONDS,
     DEFAULT_MORNING_DEADLINE_HOUR,
     DEFAULT_MORNING_DEADLINE_MINUTE,
     DEFAULT_ROUGE_HP_BLENDED_CAP,
+    DEFAULT_SIGNAL_MIN_HOLD_MINUTES,
     DEFAULT_SOLAR_SMOOTH_ALPHA,
     DEFAULT_SURPLUS_SAFETY_MARGIN_W,
     DEFAULT_TANK_CAPACITY_L,
@@ -88,6 +97,11 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_smooth_w: float | None = None
         self._last_switch_change_at: datetime | None = None
         self._last_known_switch_state: bool = False
+        # Tracks when the signal switch was last turned ON, so the 2h hold
+        # can be enforced even across HA restarts.
+        self._signal_on_at: datetime | None = None
+        # Last applied target temperature (so we don't spam set_temperature).
+        self._last_applied_target_c: float | None = None
         self._today_kwh: float = 0.0
         self._today_date: date | None = None
         self._daily_outdoor_sum: float = 0.0
@@ -96,7 +110,7 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Last computed decision
         self._last_decision: Decision = Decision(
-            heater_on=False, reason="initial", action="wait"
+            signal_switch_on=False, boost_mode_on=False, reason="initial", action="wait",
         )
 
     # ------------------------------------------------------------------
@@ -134,6 +148,12 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             rouge_hp_blended_cap_eur_per_kwh=float(
                 self._cfg(CONF_ROUGE_HP_BLENDED_CAP, DEFAULT_ROUGE_HP_BLENDED_CAP)
+            ),
+            signal_min_hold_minutes=int(
+                self._cfg(CONF_SIGNAL_MIN_HOLD_MINUTES, DEFAULT_SIGNAL_MIN_HOLD_MINUTES)
+            ),
+            boost_extra_surplus_w=float(
+                self._cfg(CONF_BOOST_EXTRA_SURPLUS_W, DEFAULT_BOOST_EXTRA_SURPLUS_W)
             ),
         )
 
@@ -225,6 +245,10 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._today_date = None
         self._daily_outdoor_sum = float(data.get("daily_outdoor_sum", 0.0))
         self._daily_outdoor_count = int(data.get("daily_outdoor_count", 0))
+        self._signal_on_at = _parse_iso(data.get("signal_on_at"))
+        last_target = data.get("last_applied_target_c")
+        if last_target is not None:
+            self._last_applied_target_c = float(last_target)
 
     async def _save_state(self) -> None:
         await self._store.async_save(
@@ -245,6 +269,8 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "today_date": self._today_date.isoformat() if self._today_date else None,
                 "daily_outdoor_sum": self._daily_outdoor_sum,
                 "daily_outdoor_count": self._daily_outdoor_count,
+                "signal_on_at": _to_iso(self._signal_on_at),
+                "last_applied_target_c": self._last_applied_target_c,
             }
         )
 
@@ -364,6 +390,11 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             effective_mode = "boost"
             self._force_skim = False
 
+        # Read the actual contactor state so the decision knows whether
+        # we're inside the 2h commitment window.
+        signal_id = self._entity(CONF_SIGNAL_SWITCH_ENTITY)
+        actual_signal_on = self._get_state(signal_id) == STATE_ON
+
         inputs = Inputs(
             now=now,
             mode=effective_mode,
@@ -381,12 +412,16 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             forecast_tomorrow_kwh=forecast_tomorrow_kwh,
             energy_needed_kwh=energy_needed,
             cycle=self._cycle,
+            signal_on_at=self._signal_on_at,
+            signal_currently_on=actual_signal_on,
         )
         decision = decide(inputs, self.thresholds)
         self._last_decision = decision
 
-        # Apply, respecting min-dwell rate limit (heater dislikes rapid cycling).
-        await self._apply_switch(decision.heater_on, now)
+        # Apply both controls. signal_switch respects min-dwell; boost is
+        # responsive (just write the target temperature each tick).
+        await self._apply_signal(decision.signal_switch_on, actual_signal_on, now)
+        await self._apply_boost(decision.boost_mode_on)
 
         await self._save_state()
         return self._build_data(
@@ -424,19 +459,19 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return 1.0
         return max(0.0, min(1.0, (heater_w - grid_raw_w) / heater_w))
 
-    async def _apply_switch(self, desired_on: bool, now: datetime) -> None:
+    async def _apply_signal(
+        self, desired_on: bool, actual_on: bool, now: datetime,
+    ) -> None:
+        """Drive the contactor (signal switch) with min-dwell + cycle bookkeeping."""
         switch_id = self._entity(CONF_SIGNAL_SWITCH_ENTITY)
         if not switch_id:
             return
 
-        # Read current switch state.
-        actual = self._get_state(switch_id)
-        actual_on = actual == STATE_ON
         if actual_on == desired_on:
             self._last_known_switch_state = actual_on
             return
 
-        # Rate limit. Manual mode bypass.
+        # Rate limit. Manual mode bypasses.
         dwell = float(self._cfg(CONF_MIN_DWELL_SECONDS, DEFAULT_MIN_DWELL_SECONDS))
         bypass = self._mode in MANUAL_MODES
         elapsed = (
@@ -446,7 +481,7 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         if not bypass and elapsed < dwell:
             _LOGGER.debug(
-                "DHWP Smart: rate-limited (%.0fs < %.0fs), holding switch=%s",
+                "DHWP Smart: signal rate-limited (%.0fs < %.0fs), holding=%s",
                 elapsed, dwell, actual_on,
             )
             return
@@ -461,11 +496,12 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._last_switch_change_at = now
 
-        # Cycle bookkeeping: opening on edge → reset cycle.
+        # Cycle bookkeeping + 2h-hold timestamp.
         if desired_on and not self._last_known_switch_state:
             self._cycle = CycleAccumulator()
             self._cycle_started_at = now
-            _LOGGER.info("DHWP Smart: cycle started")
+            self._signal_on_at = now
+            _LOGGER.info("DHWP Smart: signal ON — cycle started (2h commit)")
         elif not desired_on and self._last_known_switch_state and self._cycle_started_at:
             self._last_cycle_summary = {
                 "ended_at": now.isoformat(),
@@ -477,15 +513,45 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "blended_eur_per_kwh": blended_cost_eur_per_kwh(self._cycle),
             }
             _LOGGER.info(
-                "DHWP Smart: cycle ended — %.2f kWh (solar %.2f, hc %.2f, hp %.2f), "
-                "cost %.3f € (blended %.4f €/kWh)",
+                "DHWP Smart: signal OFF — cycle ended: %.2f kWh "
+                "(solar %.2f, hc %.2f, hp %.2f), cost %.3f € (blended %.4f €/kWh)",
                 self._cycle.kwh_solar + self._cycle.kwh_hc + self._cycle.kwh_hp,
                 self._cycle.kwh_solar, self._cycle.kwh_hc, self._cycle.kwh_hp,
                 self._cycle.cost_eur, blended_cost_eur_per_kwh(self._cycle),
             )
             self._cycle_started_at = None
+            self._signal_on_at = None
 
         self._last_known_switch_state = desired_on
+
+    async def _apply_boost(self, boost_on: bool) -> None:
+        """Set the water_heater target temperature: 55°C (boost) or 54°C (eco).
+
+        Responsive — no min-dwell. The water_heater entity itself rate-
+        limits set_temperature calls (Atlantic's Cozytouch poll is minutes).
+        Skips the call when the target already matches what we want.
+        """
+        wh_id = self._entity(CONF_WATER_HEATER_ENTITY)
+        if not wh_id:
+            return
+        eco = float(self._cfg(CONF_ECO_TARGET_C, DEFAULT_ECO_TARGET_C))
+        boost = float(self._cfg(CONF_BOOST_TARGET_C, DEFAULT_BOOST_TARGET_C))
+        target = boost if boost_on else eco
+        if self._last_applied_target_c is not None and abs(self._last_applied_target_c - target) < 0.1:
+            return
+        _LOGGER.info(
+            "DHWP Smart: water_heater.set_temperature %.1f°C (boost=%s) — %s",
+            target, boost_on, self._last_decision.reason,
+        )
+        try:
+            await self.hass.services.async_call(
+                "water_heater", "set_temperature",
+                {"entity_id": wh_id, "temperature": target},
+                blocking=True,
+            )
+            self._last_applied_target_c = target
+        except Exception as err:                                # pragma: no cover
+            _LOGGER.warning("DHWP Smart: set_temperature failed: %s", err)
 
     async def _finalise_yesterday(self) -> None:
         """Close yesterday's daily aggregation and fold it into the weekday pattern."""
@@ -523,11 +589,19 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         heater_w: float,
         forecast_today_kwh: float | None,
     ) -> dict[str, Any]:
+        # Minutes remaining of the 2h commitment if signal is on.
+        hold_remaining_min: int | None = None
+        if self._signal_on_at is not None:
+            hold_total = int(self._cfg(CONF_SIGNAL_MIN_HOLD_MINUTES, DEFAULT_SIGNAL_MIN_HOLD_MINUTES))
+            elapsed_min = (datetime.now(timezone.utc) - self._signal_on_at).total_seconds() / 60.0
+            hold_remaining_min = max(0, int(hold_total - elapsed_min))
         return {
             "mode": self._mode,
             "decision_action": decision.action,
             "decision_reason": decision.reason,
-            "heater_on": decision.heater_on,
+            "signal_switch_on": decision.signal_switch_on,
+            "boost_mode_on": decision.boost_mode_on,
+            "heater_on": decision.signal_switch_on,  # back-compat alias
             "energy_needed_kwh": round(energy_needed, 2),
             "expected_usage_today_kwh": round(expected_usage, 2),
             "cycle_kwh_today": round(self._today_kwh, 2),
@@ -541,6 +615,7 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             "pattern_samples": self._pattern.samples_n,
             "outdoor_coef": round(self._pattern.outdoor_coef, 3),
+            "signal_hold_remaining_min": hold_remaining_min,
         }
 
 

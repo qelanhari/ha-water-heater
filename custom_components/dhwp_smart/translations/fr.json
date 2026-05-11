@@ -6,7 +6,8 @@
         "description": "Sélectionnez le contacteur, les capteurs et les entités Tempo. Forecast.Solar est optionnel mais recommandé.",
         "data": {
           "name": "Nom",
-          "signal_switch_entity": "Contacteur (coupe le secteur du chauffe-eau)",
+          "signal_switch_entity": "Contacteur Signal (cycle minimum 2 h une fois activé)",
+          "water_heater_entity": "Entité water_heater (son setpoint sert au boost 54↔55°C, réactif)",
           "tank_top_temp_entity": "Température haut de cuve",
           "tank_middle_temp_entity": "Température milieu de cuve (capteur de seuil matin)",
           "heater_power_entity": "Puissance pompe à chaleur (W)",
@@ -29,16 +30,20 @@
           "tank_capacity_l": "Capacité (litres)",
           "tank_target_top_c": "Température cible haut de cuve (°C)",
           "tank_morning_floor_c": "Seuil minimum au matin (°C)",
+          "eco_target_c": "Cible Eco (°C)",
+          "boost_target_c": "Cible Boost (°C) — quand surplus abondant",
           "morning_deadline_hour": "Heure limite matin",
           "morning_deadline_minute": "Minute limite matin"
         }
       },
       "guardrails": {
         "title": "Smart DHWP — garde-fous",
-        "description": "Règles de coût et anti-flap.",
+        "description": "Règles de coût, seuils solaires, hold signal et anti-flap.",
         "data": {
           "rouge_hp_blended_cap": "Plafond coût mixte Tempo Rouge HP (€/kWh)",
           "surplus_safety_margin_w": "Marge de sécurité solaire (W)",
+          "boost_extra_surplus_w": "Surplus supplémentaire requis pour activer le boost (W)",
+          "signal_min_hold_minutes": "Durée minimum du signal une fois activé (minutes)",
           "min_dwell_seconds": "Temps minimum entre commutations (s)",
           "solar_smooth_alpha": "Alpha EMA réseau (plus bas = plus lissé)"
         }
@@ -51,15 +56,20 @@
           "tank_capacity_l": "Capacité (litres)",
           "tank_target_top_c": "Température cible (°C)",
           "tank_morning_floor_c": "Seuil minimum matin (°C)",
+          "eco_target_c": "Cible Eco (°C)",
+          "boost_target_c": "Cible Boost (°C)",
           "morning_deadline_hour": "Heure limite",
           "morning_deadline_minute": "Minute limite" } },
       "guardrails": { "title": "Smart DHWP — garde-fous", "data": {
           "rouge_hp_blended_cap": "Plafond coût mixte Rouge HP (€/kWh)",
           "surplus_safety_margin_w": "Marge solaire (W)",
+          "boost_extra_surplus_w": "Surplus supplémentaire pour le boost (W)",
+          "signal_min_hold_minutes": "Hold signal (minutes)",
           "min_dwell_seconds": "Min temps entre commutations (s)",
           "solar_smooth_alpha": "Alpha EMA réseau" } },
       "entities": { "title": "Smart DHWP — entités", "data": {
-          "signal_switch_entity": "Contacteur",
+          "signal_switch_entity": "Contacteur Signal",
+          "water_heater_entity": "Entité water_heater",
           "tank_top_temp_entity": "Température haut de cuve",
           "tank_middle_temp_entity": "Température milieu de cuve",
           "heater_power_entity": "Puissance pompe à chaleur",
@@ -98,10 +108,12 @@
       "grid_smooth": { "name": "Puissance réseau (lissée)" },
       "expected_usage": { "name": "Usage attendu aujourd'hui" },
       "forecast_today": { "name": "Prévision solaire du jour" },
-      "pattern_samples": { "name": "Échantillons appris" }
+      "pattern_samples": { "name": "Échantillons appris" },
+      "signal_hold_remaining": { "name": "Hold signal restant" }
     },
     "binary_sensor": {
       "heating_now": { "name": "Chauffe en cours" },
+      "boost_mode": { "name": "Mode boost (55°C)" },
       "hard_floor_breach": { "name": "Seuil minimum dépassé" }
     },
     "button": {

@@ -8,7 +8,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy, UnitOfPower
+from homeassistant.const import UnitOfEnergy, UnitOfPower, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
@@ -33,6 +33,7 @@ async def async_setup_entry(
         DhwpExpectedUsage(coordinator, entry),
         DhwpForecastToday(coordinator, entry),
         DhwpPatternSamples(coordinator, entry),
+        DhwpSignalHoldRemaining(coordinator, entry),
     ])
 
 
@@ -181,6 +182,25 @@ class DhwpForecastToday(_Base):
     def native_value(self):
         d = self.coordinator.data
         return d.get("forecast_today_kwh") if d else None
+
+
+class DhwpSignalHoldRemaining(_Base):
+    """Minutes left on the 2h commitment after the signal switch was turned on."""
+
+    _attr_translation_key = "signal_hold_remaining"
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:timer-sand"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_signal_hold_remaining"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        return d.get("signal_hold_remaining_min") if d else None
 
 
 class DhwpPatternSamples(_Base):

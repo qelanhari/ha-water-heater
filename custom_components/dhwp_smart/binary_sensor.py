@@ -24,6 +24,7 @@ async def async_setup_entry(
     async_add_entities([
         DhwpHeatingNow(coordinator, entry),
         DhwpHardFloorBreach(coordinator, entry),
+        DhwpBoostMode(coordinator, entry),
     ])
 
 
@@ -52,6 +53,21 @@ class DhwpHeatingNow(_Base):
     @property
     def is_on(self) -> bool:
         return bool((self.coordinator.data or {}).get("heater_on"))
+
+
+class DhwpBoostMode(_Base):
+    """On when the integration has set the water heater target to the boost temp (55°C)."""
+
+    _attr_translation_key = "boost_mode"
+    _attr_icon = "mdi:fire-circle"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_boost_mode"
+
+    @property
+    def is_on(self) -> bool:
+        return bool((self.coordinator.data or {}).get("boost_mode_on"))
 
 
 class DhwpHardFloorBreach(_Base):

@@ -6,7 +6,8 @@
         "description": "Pick the contactor switch, sensors, and Tempo entities. Forecast.Solar fields are optional but recommended.",
         "data": {
           "name": "Name",
-          "signal_switch_entity": "Contactor switch (gates mains to the water heater)",
+          "signal_switch_entity": "Signal switch (the contactor — 2h commit once turned on)",
+          "water_heater_entity": "water_heater entity (its target temperature is used for the responsive 54↔55°C boost)",
           "tank_top_temp_entity": "Tank top temperature",
           "tank_middle_temp_entity": "Tank middle temperature (the morning floor sensor)",
           "heater_power_entity": "Heat-pump electrical power (W)",
@@ -29,17 +30,21 @@
           "tank_capacity_l": "Tank capacity (litres)",
           "tank_target_top_c": "Target top temperature (°C)",
           "tank_morning_floor_c": "Morning floor temperature (°C)",
+          "eco_target_c": "Eco target temperature (°C)",
+          "boost_target_c": "Boost target temperature (°C) — used when surplus is abundant",
           "morning_deadline_hour": "Morning deadline hour",
           "morning_deadline_minute": "Morning deadline minute"
         }
       },
       "guardrails": {
         "title": "Smart DHWP — guardrails",
-        "description": "Cost rules and anti-flap tuning.",
+        "description": "Cost rules, surplus thresholds, signal hold + anti-flap tuning.",
         "data": {
           "rouge_hp_blended_cap": "Tempo Rouge HP blended cap (€/kWh)",
           "surplus_safety_margin_w": "Solar surplus safety margin (W)",
-          "min_dwell_seconds": "Min time between switch changes (s)",
+          "boost_extra_surplus_w": "Extra surplus required to enable boost (W)",
+          "signal_min_hold_minutes": "Signal switch min hold (minutes)",
+          "min_dwell_seconds": "Min time between signal changes (s)",
           "solar_smooth_alpha": "Grid EMA alpha (lower = more smoothing)"
         }
       }
@@ -53,6 +58,8 @@
           "tank_capacity_l": "Tank capacity (litres)",
           "tank_target_top_c": "Target top temperature (°C)",
           "tank_morning_floor_c": "Morning floor temperature (°C)",
+          "eco_target_c": "Eco target temperature (°C)",
+          "boost_target_c": "Boost target temperature (°C)",
           "morning_deadline_hour": "Morning deadline hour",
           "morning_deadline_minute": "Morning deadline minute"
         }
@@ -62,14 +69,17 @@
         "data": {
           "rouge_hp_blended_cap": "Tempo Rouge HP blended cap (€/kWh)",
           "surplus_safety_margin_w": "Solar surplus safety margin (W)",
-          "min_dwell_seconds": "Min time between switch changes (s)",
+          "boost_extra_surplus_w": "Extra surplus required for boost (W)",
+          "signal_min_hold_minutes": "Signal switch min hold (minutes)",
+          "min_dwell_seconds": "Min time between signal changes (s)",
           "solar_smooth_alpha": "Grid EMA alpha"
         }
       },
       "entities": {
         "title": "Smart DHWP — entities",
         "data": {
-          "signal_switch_entity": "Contactor switch",
+          "signal_switch_entity": "Signal switch (contactor)",
+          "water_heater_entity": "water_heater entity (for boost target)",
           "tank_top_temp_entity": "Tank top temperature",
           "tank_middle_temp_entity": "Tank middle temperature",
           "heater_power_entity": "Heat-pump electrical power",
@@ -110,10 +120,12 @@
       "grid_smooth": { "name": "Grid power (smoothed)" },
       "expected_usage": { "name": "Expected usage today" },
       "forecast_today": { "name": "Solar forecast today" },
-      "pattern_samples": { "name": "Pattern samples" }
+      "pattern_samples": { "name": "Pattern samples" },
+      "signal_hold_remaining": { "name": "Signal hold remaining" }
     },
     "binary_sensor": {
       "heating_now": { "name": "Heating now" },
+      "boost_mode": { "name": "Boost mode (55°C)" },
       "hard_floor_breach": { "name": "Hard floor breach" }
     },
     "button": {
