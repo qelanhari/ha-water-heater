@@ -1,0 +1,11 @@
+{
+  "domain": "dhwp_smart",
+  "name": "Smart DHWP (Hot Water + Solar + Tempo)",
+  "version": "0.1.0",
+  "documentation": "https://github.com/qelanhari/ha-water-heater",
+  "issue_tracker": "https://github.com/qelanhari/ha-water-heater/issues",
+  "dependencies": ["sun"],
+  "codeowners": ["@qelanhari"],
+  "iot_class": "local_polling",
+  "config_flow": true
+}

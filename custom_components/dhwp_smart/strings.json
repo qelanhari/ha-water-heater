@@ -1,0 +1,124 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Smart DHWP — entities",
+        "description": "Pick the contactor switch, sensors, and Tempo entities. Forecast.Solar fields are optional but recommended.",
+        "data": {
+          "name": "Name",
+          "signal_switch_entity": "Contactor switch (gates mains to the water heater)",
+          "tank_top_temp_entity": "Tank top temperature",
+          "tank_middle_temp_entity": "Tank middle temperature (the morning floor sensor)",
+          "heater_power_entity": "Heat-pump electrical power (W)",
+          "heater_booster_power_entity": "Electric booster power (W) — optional",
+          "heater_energy_meter_entity": "Heater lifetime energy meter (kWh)",
+          "grid_power_entity": "Grid power (negative = exporting solar)",
+          "pv_power_entity": "PV production (W) — optional, for diagnostics",
+          "garage_temp_entity": "Garage temperature (where the heater is)",
+          "outdoor_temp_entity": "Outdoor temperature — optional, for pattern learning",
+          "tempo_color_entity": "Today's Tempo color sensor",
+          "tempo_next_color_entity": "Tomorrow's Tempo color — optional",
+          "tempo_is_hc_entity": "Tempo HC binary sensor",
+          "forecast_today_entity": "Forecast.Solar — today total (Wh) — optional",
+          "forecast_tomorrow_entity": "Forecast.Solar — tomorrow total (Wh) — optional"
+        }
+      },
+      "tank": {
+        "title": "Smart DHWP — tank",
+        "data": {
+          "tank_capacity_l": "Tank capacity (litres)",
+          "tank_target_top_c": "Target top temperature (°C)",
+          "tank_morning_floor_c": "Morning floor temperature (°C)",
+          "morning_deadline_hour": "Morning deadline hour",
+          "morning_deadline_minute": "Morning deadline minute"
+        }
+      },
+      "guardrails": {
+        "title": "Smart DHWP — guardrails",
+        "description": "Cost rules and anti-flap tuning.",
+        "data": {
+          "rouge_hp_blended_cap": "Tempo Rouge HP blended cap (€/kWh)",
+          "surplus_safety_margin_w": "Solar surplus safety margin (W)",
+          "min_dwell_seconds": "Min time between switch changes (s)",
+          "solar_smooth_alpha": "Grid EMA alpha (lower = more smoothing)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "tank": {
+        "title": "Smart DHWP — tank",
+        "data": {
+          "tank_capacity_l": "Tank capacity (litres)",
+          "tank_target_top_c": "Target top temperature (°C)",
+          "tank_morning_floor_c": "Morning floor temperature (°C)",
+          "morning_deadline_hour": "Morning deadline hour",
+          "morning_deadline_minute": "Morning deadline minute"
+        }
+      },
+      "guardrails": {
+        "title": "Smart DHWP — guardrails",
+        "data": {
+          "rouge_hp_blended_cap": "Tempo Rouge HP blended cap (€/kWh)",
+          "surplus_safety_margin_w": "Solar surplus safety margin (W)",
+          "min_dwell_seconds": "Min time between switch changes (s)",
+          "solar_smooth_alpha": "Grid EMA alpha"
+        }
+      },
+      "entities": {
+        "title": "Smart DHWP — entities",
+        "data": {
+          "signal_switch_entity": "Contactor switch",
+          "tank_top_temp_entity": "Tank top temperature",
+          "tank_middle_temp_entity": "Tank middle temperature",
+          "heater_power_entity": "Heat-pump electrical power",
+          "heater_booster_power_entity": "Electric booster power",
+          "heater_energy_meter_entity": "Heater lifetime energy meter",
+          "grid_power_entity": "Grid power",
+          "pv_power_entity": "PV production",
+          "garage_temp_entity": "Garage temperature",
+          "outdoor_temp_entity": "Outdoor temperature",
+          "tempo_color_entity": "Tempo color sensor",
+          "tempo_next_color_entity": "Tomorrow's Tempo color",
+          "tempo_is_hc_entity": "Tempo HC binary sensor",
+          "forecast_today_entity": "Forecast.Solar today",
+          "forecast_tomorrow_entity": "Forecast.Solar tomorrow"
+        }
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "mode": {
+        "name": "Mode",
+        "state": {
+          "auto": "Auto",
+          "off": "Off",
+          "boost": "Boost (force on)",
+          "hc_only": "HC only",
+          "solar_only": "Solar only"
+        }
+      }
+    },
+    "sensor": {
+      "action": { "name": "Action" },
+      "reason": { "name": "Decision reason" },
+      "energy_needed": { "name": "Energy needed by morning" },
+      "cycle_kwh_today": { "name": "Energy consumed today" },
+      "blended_cost": { "name": "Cycle blended cost" },
+      "grid_smooth": { "name": "Grid power (smoothed)" },
+      "expected_usage": { "name": "Expected usage today" },
+      "forecast_today": { "name": "Solar forecast today" },
+      "pattern_samples": { "name": "Pattern samples" }
+    },
+    "binary_sensor": {
+      "heating_now": { "name": "Heating now" },
+      "hard_floor_breach": { "name": "Hard floor breach" }
+    },
+    "button": {
+      "force_heat": { "name": "Force heat now" },
+      "reset_patterns": { "name": "Reset weekday patterns" }
+    }
+  }
+}

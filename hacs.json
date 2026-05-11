@@ -1,0 +1,6 @@
+{
+  "name": "Smart DHWP (Hot Water + Solar + Tempo)",
+  "render_readme": true,
+  "homeassistant": "2024.1.0",
+  "content_in_root": false
+}
