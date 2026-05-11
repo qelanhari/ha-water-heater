@@ -11,7 +11,6 @@
           "tank_top_temp_entity": "Tank top temperature",
           "tank_middle_temp_entity": "Tank middle temperature (the morning floor sensor)",
           "heater_power_entity": "Heat-pump electrical power (W)",
-          "heater_booster_power_entity": "Electric booster power (W) — optional",
           "heater_energy_meter_entity": "Heater lifetime energy meter (kWh)",
           "grid_power_entity": "Grid power (negative = exporting solar)",
           "pv_power_entity": "PV production (W) — optional, for diagnostics",
@@ -83,7 +82,6 @@
           "tank_top_temp_entity": "Tank top temperature",
           "tank_middle_temp_entity": "Tank middle temperature",
           "heater_power_entity": "Heat-pump electrical power",
-          "heater_booster_power_entity": "Electric booster power",
           "heater_energy_meter_entity": "Heater lifetime energy meter",
           "grid_power_entity": "Grid power",
           "pv_power_entity": "PV production",
@@ -112,25 +110,55 @@
       }
     },
     "sensor": {
-      "action": { "name": "Action" },
-      "reason": { "name": "Decision reason" },
-      "energy_needed": { "name": "Energy needed by morning" },
-      "cycle_kwh_today": { "name": "Energy consumed today" },
-      "blended_cost": { "name": "Cycle blended cost" },
-      "grid_smooth": { "name": "Grid power (smoothed)" },
-      "expected_usage": { "name": "Expected usage today" },
-      "forecast_today": { "name": "Solar forecast today" },
-      "pattern_samples": { "name": "Pattern samples" },
-      "signal_hold_remaining": { "name": "Signal hold remaining" }
+      "action": {
+        "name": "Action"
+      },
+      "reason": {
+        "name": "Decision reason"
+      },
+      "energy_needed": {
+        "name": "Energy needed by morning"
+      },
+      "cycle_kwh_today": {
+        "name": "Energy consumed today"
+      },
+      "blended_cost": {
+        "name": "Cycle blended cost"
+      },
+      "grid_smooth": {
+        "name": "Grid power (smoothed)"
+      },
+      "expected_usage": {
+        "name": "Expected usage today"
+      },
+      "forecast_today": {
+        "name": "Solar forecast today"
+      },
+      "pattern_samples": {
+        "name": "Pattern samples"
+      },
+      "signal_hold_remaining": {
+        "name": "Signal hold remaining"
+      }
     },
     "binary_sensor": {
-      "heating_now": { "name": "Heating now" },
-      "boost_mode": { "name": "Boost mode (55°C)" },
-      "hard_floor_breach": { "name": "Hard floor breach" }
+      "heating_now": {
+        "name": "Heating now"
+      },
+      "boost_mode": {
+        "name": "Boost mode (55°C)"
+      },
+      "hard_floor_breach": {
+        "name": "Hard floor breach"
+      }
     },
     "button": {
-      "force_heat": { "name": "Force heat now" },
-      "reset_patterns": { "name": "Reset weekday patterns" }
+      "force_heat": {
+        "name": "Force heat now"
+      },
+      "reset_patterns": {
+        "name": "Reset weekday patterns"
+      }
     }
   }
 }

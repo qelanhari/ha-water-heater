@@ -11,7 +11,6 @@
           "tank_top_temp_entity": "Température haut de cuve",
           "tank_middle_temp_entity": "Température milieu de cuve (capteur de seuil matin)",
           "heater_power_entity": "Puissance pompe à chaleur (W)",
-          "heater_booster_power_entity": "Puissance résistance d'appoint (W) — optionnel",
           "heater_energy_meter_entity": "Compteur d'énergie cumulé du chauffe-eau (kWh)",
           "grid_power_entity": "Puissance réseau (négatif = export solaire)",
           "pv_power_entity": "Production photovoltaïque (W) — optionnel",
@@ -52,28 +51,37 @@
   },
   "options": {
     "step": {
-      "tank": { "title": "Smart DHWP — cuve", "data": {
+      "tank": {
+        "title": "Smart DHWP — cuve",
+        "data": {
           "tank_capacity_l": "Capacité (litres)",
           "tank_target_top_c": "Température cible (°C)",
           "tank_morning_floor_c": "Seuil minimum matin (°C)",
           "eco_target_c": "Cible Eco (°C)",
           "boost_target_c": "Cible Boost (°C)",
           "morning_deadline_hour": "Heure limite",
-          "morning_deadline_minute": "Minute limite" } },
-      "guardrails": { "title": "Smart DHWP — garde-fous", "data": {
+          "morning_deadline_minute": "Minute limite"
+        }
+      },
+      "guardrails": {
+        "title": "Smart DHWP — garde-fous",
+        "data": {
           "rouge_hp_blended_cap": "Plafond coût mixte Rouge HP (€/kWh)",
           "surplus_safety_margin_w": "Marge solaire (W)",
           "boost_extra_surplus_w": "Surplus supplémentaire pour le boost (W)",
           "signal_min_hold_minutes": "Hold signal (minutes)",
           "min_dwell_seconds": "Min temps entre commutations (s)",
-          "solar_smooth_alpha": "Alpha EMA réseau" } },
-      "entities": { "title": "Smart DHWP — entités", "data": {
+          "solar_smooth_alpha": "Alpha EMA réseau"
+        }
+      },
+      "entities": {
+        "title": "Smart DHWP — entités",
+        "data": {
           "signal_switch_entity": "Contacteur Signal",
           "water_heater_entity": "Entité water_heater",
           "tank_top_temp_entity": "Température haut de cuve",
           "tank_middle_temp_entity": "Température milieu de cuve",
           "heater_power_entity": "Puissance pompe à chaleur",
-          "heater_booster_power_entity": "Puissance résistance d'appoint",
           "heater_energy_meter_entity": "Compteur cumulé chauffe-eau",
           "grid_power_entity": "Puissance réseau",
           "pv_power_entity": "Production photovoltaïque",
@@ -83,7 +91,9 @@
           "tempo_next_color_entity": "Couleur Tempo demain",
           "tempo_is_hc_entity": "Binaire HC Tempo",
           "forecast_today_entity": "Forecast.Solar aujourd'hui",
-          "forecast_tomorrow_entity": "Forecast.Solar demain" } }
+          "forecast_tomorrow_entity": "Forecast.Solar demain"
+        }
+      }
     }
   },
   "entity": {
@@ -100,25 +110,55 @@
       }
     },
     "sensor": {
-      "action": { "name": "Action" },
-      "reason": { "name": "Raison de la décision" },
-      "energy_needed": { "name": "Énergie nécessaire d'ici demain matin" },
-      "cycle_kwh_today": { "name": "Énergie consommée aujourd'hui" },
-      "blended_cost": { "name": "Coût mixte du cycle" },
-      "grid_smooth": { "name": "Puissance réseau (lissée)" },
-      "expected_usage": { "name": "Usage attendu aujourd'hui" },
-      "forecast_today": { "name": "Prévision solaire du jour" },
-      "pattern_samples": { "name": "Échantillons appris" },
-      "signal_hold_remaining": { "name": "Hold signal restant" }
+      "action": {
+        "name": "Action"
+      },
+      "reason": {
+        "name": "Raison de la décision"
+      },
+      "energy_needed": {
+        "name": "Énergie nécessaire d'ici demain matin"
+      },
+      "cycle_kwh_today": {
+        "name": "Énergie consommée aujourd'hui"
+      },
+      "blended_cost": {
+        "name": "Coût mixte du cycle"
+      },
+      "grid_smooth": {
+        "name": "Puissance réseau (lissée)"
+      },
+      "expected_usage": {
+        "name": "Usage attendu aujourd'hui"
+      },
+      "forecast_today": {
+        "name": "Prévision solaire du jour"
+      },
+      "pattern_samples": {
+        "name": "Échantillons appris"
+      },
+      "signal_hold_remaining": {
+        "name": "Hold signal restant"
+      }
     },
     "binary_sensor": {
-      "heating_now": { "name": "Chauffe en cours" },
-      "boost_mode": { "name": "Mode boost (55°C)" },
-      "hard_floor_breach": { "name": "Seuil minimum dépassé" }
+      "heating_now": {
+        "name": "Chauffe en cours"
+      },
+      "boost_mode": {
+        "name": "Mode boost (55°C)"
+      },
+      "hard_floor_breach": {
+        "name": "Seuil minimum dépassé"
+      }
     },
     "button": {
-      "force_heat": { "name": "Chauffer maintenant" },
-      "reset_patterns": { "name": "Réinitialiser l'apprentissage" }
+      "force_heat": {
+        "name": "Chauffer maintenant"
+      },
+      "reset_patterns": {
+        "name": "Réinitialiser l'apprentissage"
+      }
     }
   }
 }

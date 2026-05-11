@@ -22,7 +22,6 @@ from .const import (
     CONF_FORECAST_TOMORROW_ENTITY,
     CONF_GARAGE_TEMP_ENTITY,
     CONF_GRID_POWER_ENTITY,
-    CONF_HEATER_BOOSTER_POWER_ENTITY,
     CONF_HEATER_ENERGY_METER_ENTITY,
     CONF_HEATER_POWER_ENTITY,
     CONF_MIN_DWELL_SECONDS,
@@ -322,9 +321,13 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Read sensors.
         grid_raw = self._get_float(self._entity(CONF_GRID_POWER_ENTITY)) or 0.0
         pv = self._get_float(self._entity(CONF_PV_POWER_ENTITY)) or 0.0
-        heater_w = self._get_float(self._entity(CONF_HEATER_POWER_ENTITY)) or 0.0
-        booster_w = self._get_float(self._entity(CONF_HEATER_BOOSTER_POWER_ENTITY)) or 0.0
-        heater_total_w = heater_w + booster_w
+        # The Atlantic DHWP has a backup electric resistor ("auxiliary") that
+        # kicks in only when ambient air drops too low for the heat pump
+        # alone. At this installation's latitude that never happens, so we
+        # only watch the heat-pump power draw. The auxiliary CONF key
+        # remains in const.py for backwards-compat of existing entries but
+        # we don't read it.
+        heater_total_w = self._get_float(self._entity(CONF_HEATER_POWER_ENTITY)) or 0.0
         tank_top = self._get_float(self._entity(CONF_TANK_TOP_TEMP_ENTITY)) or 0.0
         tank_mid = self._get_float(self._entity(CONF_TANK_MIDDLE_TEMP_ENTITY)) or 0.0
         garage_c = self._get_float(self._entity(CONF_GARAGE_TEMP_ENTITY)) or 18.0
