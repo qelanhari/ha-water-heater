@@ -13,6 +13,7 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_BOOST_EXTRA_SURPLUS_W,
@@ -248,6 +249,9 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         last_target = data.get("last_applied_target_c")
         if last_target is not None:
             self._last_applied_target_c = float(last_target)
+        # Restore the observed switch state so cycle-edge bookkeeping in
+        # `_apply_signal` works correctly when HA restarts mid-cycle.
+        self._last_known_switch_state = bool(data.get("last_known_switch_state", False))
 
     async def _save_state(self) -> None:
         await self._store.async_save(
@@ -270,6 +274,7 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "daily_outdoor_count": self._daily_outdoor_count,
                 "signal_on_at": _to_iso(self._signal_on_at),
                 "last_applied_target_c": self._last_applied_target_c,
+                "last_known_switch_state": self._last_known_switch_state,
             }
         )
 
@@ -308,8 +313,13 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> dict[str, Any]:
-        now = datetime.now(timezone.utc)
-        local_now = datetime.now()
+        # dt_util.now() returns a timezone-aware datetime in HA's configured
+        # timezone — so `now.time()` is local time-of-day, which is what the
+        # morning-window threshold means. (Previously we used
+        # `datetime.now(timezone.utc)` which made the morning window fire
+        # in UTC, i.e. 2 hours late in CEST.)
+        now = dt_util.now()
+        local_now = now
 
         # Daily rollover: if the date changed, close yesterday's pattern.
         today = local_now.date()
@@ -328,18 +338,30 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # remains in const.py for backwards-compat of existing entries but
         # we don't read it.
         heater_total_w = self._get_float(self._entity(CONF_HEATER_POWER_ENTITY)) or 0.0
-        tank_top = self._get_float(self._entity(CONF_TANK_TOP_TEMP_ENTITY)) or 0.0
-        tank_mid = self._get_float(self._entity(CONF_TANK_MIDDLE_TEMP_ENTITY)) or 0.0
+        # Tank temps are CRITICAL — keep them Optional so the decision module
+        # can skip the hard-floor check when the sensor is down rather than
+        # mistaking "no reading" for "0 °C" and forcing heat all morning.
+        tank_top_opt = self._get_float(self._entity(CONF_TANK_TOP_TEMP_ENTITY))
+        tank_mid_opt = self._get_float(self._entity(CONF_TANK_MIDDLE_TEMP_ENTITY))
+        # The energy-budget math still needs a number for tank_top; if the
+        # sensor is unavailable we assume we're at the target (so the math
+        # returns 0 kWh needed — safe default that won't over-heat).
+        tank_top = tank_top_opt if tank_top_opt is not None else float(
+            self._cfg(CONF_TANK_TARGET_TOP_C, DEFAULT_TANK_TARGET_TOP_C)
+        )
         garage_c = self._get_float(self._entity(CONF_GARAGE_TEMP_ENTITY)) or 18.0
         outdoor_c = self._get_float(self._entity(CONF_OUTDOOR_TEMP_ENTITY))
         tempo_color = self._get_state(self._entity(CONF_TEMPO_COLOR_ENTITY)) or "Bleu"
         tempo_next = self._get_state(self._entity(CONF_TEMPO_NEXT_COLOR_ENTITY))
         is_hc_raw = self._get_state(self._entity(CONF_TEMPO_IS_HC_ENTITY))
         is_hc = is_hc_raw == STATE_ON
-        forecast_today_wh = self._get_float(self._entity(CONF_FORECAST_TODAY_ENTITY))
-        forecast_tomorrow_wh = self._get_float(self._entity(CONF_FORECAST_TOMORROW_ENTITY))
-        forecast_today_kwh = forecast_today_wh / 1000.0 if forecast_today_wh else None
-        forecast_tomorrow_kwh = forecast_tomorrow_wh / 1000.0 if forecast_tomorrow_wh else None
+        # Forecast.Solar exposes its `energy_production_*` sensors in **kWh**
+        # (unit attribute = "kWh"). Earlier versions of this integration
+        # divided by 1000, treating the value as Wh — that made today's
+        # remaining forecast read 0.014 kWh instead of 14 kWh and the brain
+        # always decided "forecast too low, wait for HC". Use the value as-is.
+        forecast_today_kwh = self._get_float(self._entity(CONF_FORECAST_TODAY_ENTITY))
+        forecast_tomorrow_kwh = self._get_float(self._entity(CONF_FORECAST_TOMORROW_ENTITY))
         energy_meter_wh = self._get_float(self._entity(CONF_HEATER_ENERGY_METER_ENTITY))
 
         # EMA-smooth grid.
@@ -402,7 +424,7 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             now=now,
             mode=effective_mode,
             tank_top_c=tank_top,
-            tank_middle_c=tank_mid,
+            tank_middle_c=tank_mid_opt,
             garage_c=garage_c,
             outdoor_c=outdoor_c,
             grid_smooth_w=self._grid_smooth_w,
@@ -541,6 +563,10 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         boost = float(self._cfg(CONF_BOOST_TARGET_C, DEFAULT_BOOST_TARGET_C))
         target = boost if boost_on else eco
         if self._last_applied_target_c is not None and abs(self._last_applied_target_c - target) < 0.1:
+            _LOGGER.debug(
+                "DHWP Smart: boost target already at %.1f°C (boost=%s) — skip",
+                target, boost_on,
+            )
             return
         _LOGGER.info(
             "DHWP Smart: water_heater.set_temperature %.1f°C (boost=%s) — %s",

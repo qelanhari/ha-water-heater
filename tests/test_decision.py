@@ -130,6 +130,23 @@ class TestSignalHold:
         assert d_high.boost_mode_on is True
         assert d_low.boost_mode_on is False
 
+    def test_action_never_says_wait_when_heater_is_on_in_hold(self, base_inputs, thr):
+        """B5: during the 2h hold with no surplus and no HC, action used to
+        return 'wait' even though signal_switch_on was True — confusing."""
+        d = decide(
+            replace(
+                base_inputs,
+                signal_currently_on=True,
+                signal_on_at=base_inputs.now - timedelta(minutes=30),
+                grid_smooth_w=200.0,   # importing, no surplus
+                is_hc=False,           # HP window
+            ),
+            thr,
+        )
+        assert d.signal_switch_on is True
+        assert d.action != "wait"
+        assert d.action == "hold_signal"
+
 
 # ----------------------------------------------------------------------------
 # Hard floor breach
@@ -149,6 +166,15 @@ class TestHardFloor:
 
     def test_breach_outside_morning_no_override(self, base_inputs, thr):
         d = decide(replace(base_inputs, tank_middle_c=45.0), thr)
+        assert d.action != "hard_floor"
+
+    def test_missing_tank_middle_does_not_breach(self, base_inputs, thr):
+        """Sensor unavailable (None) must NOT be treated as 0 °C — was bug B2."""
+        morning = datetime(2026, 6, 16, 5, 0, 0, tzinfo=timezone.utc)
+        d = decide(
+            replace(base_inputs, now=morning, tank_middle_c=None),
+            thr,
+        )
         assert d.action != "hard_floor"
 
 

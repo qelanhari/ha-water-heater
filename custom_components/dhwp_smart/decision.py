@@ -57,7 +57,7 @@ class Inputs:
     now: datetime
     mode: str                                 # auto / off / boost / hc_only / solar_only
     tank_top_c: float                         # current top temperature
-    tank_middle_c: float                      # current "floor" sensor
+    tank_middle_c: float | None               # current "floor" sensor (None if unavailable)
     garage_c: float
     outdoor_c: float | None
     grid_smooth_w: float                      # negative = exporting
@@ -199,7 +199,14 @@ def decide(i: Inputs, thr: Thresholds) -> Decision:
         return Decision(False, False, "manual=solar_only · insufficient surplus", "wait")
 
     # 2. Hard floor breach — non-negotiable safety net.
-    if i.tank_middle_c < thr.hard_floor_c and _in_morning_window(i.now, thr):
+    # Skip the check entirely if the floor sensor is unavailable, rather
+    # than treating a missing reading as 0 °C (which would force heat all
+    # morning, every morning).
+    if (
+        i.tank_middle_c is not None
+        and i.tank_middle_c < thr.hard_floor_c
+        and _in_morning_window(i.now, thr)
+    ):
         return Decision(
             True, False,  # boost off — eco is enough for safety
             f"hard floor breach: tank_middle {i.tank_middle_c:.1f}°C < "
@@ -212,10 +219,21 @@ def decide(i: Inputs, thr: Thresholds) -> Decision:
     if _in_signal_hold(i, thr):
         boost = _abundant_surplus_for_boost(i, thr)
         elapsed = (i.now - i.signal_on_at).total_seconds() / 60.0  # type: ignore[union-attr]
+        # Pick an action label that doesn't lie about the heater being on:
+        #   - solar if we have surplus to boost on,
+        #   - heat_hc if we're in the HC window,
+        #   - otherwise hold_signal (heater is running on grid HP because
+        #     we committed earlier; this is rare but explicit).
+        if boost:
+            action = "heat_solar"
+        elif i.is_hc:
+            action = "heat_hc"
+        else:
+            action = "hold_signal"
         return Decision(
             True, boost,
             f"signal 2h hold (started {elapsed:.0f} min ago)",
-            "heat_solar" if boost else "heat_hc" if i.is_hc else "wait",
+            action,
         )
 
     # 3. Tempo Rouge HP — blended-cost guard. Solar-only, with worst-case projection.
