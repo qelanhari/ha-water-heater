@@ -44,8 +44,11 @@ from .const import (
     CONF_TEMPO_IS_HC_ENTITY,
     CONF_TEMPO_NEXT_COLOR_ENTITY,
     CONF_WATER_HEATER_ENTITY,
+    CONF_BOOST_DURATION_ENTITY,
     DEFAULT_BOOST_EXTRA_SURPLUS_W,
     DEFAULT_BOOST_TARGET_C,
+    DEFAULT_BOOST_DURATION_DAYS,
+    DEFAULT_BOOST_DURATION_ENTITY,
     DEFAULT_ECO_TARGET_C,
     DEFAULT_MIN_DWELL_SECONDS,
     DEFAULT_MORNING_DEADLINE_HOUR,
@@ -420,6 +423,17 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         signal_id = self._entity(CONF_SIGNAL_SWITCH_ENTITY)
         actual_signal_on = self._get_state(signal_id) == STATE_ON
 
+        # Observe the appliance's current boost state from the
+        # boost_duration number entity. >0 days = boost active.
+        bd_id = self._entity(CONF_BOOST_DURATION_ENTITY) or DEFAULT_BOOST_DURATION_ENTITY
+        bd_raw = self._get_state(bd_id)
+        try:
+            actual_boost_on = (
+                bd_raw not in (None, "unknown", "unavailable") and float(bd_raw) > 0.5
+            )
+        except (TypeError, ValueError):
+            actual_boost_on = False
+
         inputs = Inputs(
             now=now,
             mode=effective_mode,
@@ -439,14 +453,24 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             cycle=self._cycle,
             signal_on_at=self._signal_on_at,
             signal_currently_on=actual_signal_on,
+            boost_currently_on=actual_boost_on,
         )
         decision = decide(inputs, self.thresholds)
         self._last_decision = decision
 
         # Apply both controls. signal_switch respects min-dwell; boost is
-        # responsive (just write the target temperature each tick).
+        # only touched when we own a cycle (signal is on now, or we're
+        # turning it on this tick). Otherwise a manual boost set on the
+        # Atlantic by the user would be silently cleared.
         await self._apply_signal(decision.signal_switch_on, actual_signal_on, now)
-        await self._apply_boost(decision.boost_mode_on)
+        we_own_cycle = actual_signal_on or decision.signal_switch_on
+        if we_own_cycle:
+            await self._apply_boost(decision.boost_mode_on)
+        elif actual_boost_on:
+            _LOGGER.debug(
+                "DHWP Smart: manual boost detected (number=%s on, signal off) — leaving boost untouched",
+                self._entity(CONF_BOOST_DURATION_ENTITY) or DEFAULT_BOOST_DURATION_ENTITY,
+            )
 
         await self._save_state()
         return self._build_data(
@@ -550,37 +574,46 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_known_switch_state = desired_on
 
     async def _apply_boost(self, boost_on: bool) -> None:
-        """Set the water_heater target temperature: 55°C (boost) or 54°C (eco).
+        """Engage / release the Atlantic DHWP's BOOST mode by writing to its
+        `boost_mode_duration` number entity.
 
-        Responsive — no min-dwell. The water_heater entity itself rate-
-        limits set_temperature calls (Atlantic's Cozytouch poll is minutes).
-        Skips the call when the target already matches what we want.
+        Value semantics (Cozytouch): days, 0..7. Setting > 0 activates the
+        appliance's BOOST mode for that many days; setting 0 deactivates.
+        We use a 1-day window — long enough to span any single cycle and
+        short enough that an HA outage doesn't leave the heater stuck in
+        boost forever.
+
+        Replaces the earlier `water_heater.set_temperature` approach: that
+        was sending 50↔54.5 setpoint changes which thrashed the appliance
+        and aborted compressor runs (2026-05-13 incident). The number
+        entity is the appliance-native control surface for boost.
         """
-        wh_id = self._entity(CONF_WATER_HEATER_ENTITY)
-        if not wh_id:
+        bd_id = self._entity(CONF_BOOST_DURATION_ENTITY) or DEFAULT_BOOST_DURATION_ENTITY
+        if not bd_id:
             return
-        eco = float(self._cfg(CONF_ECO_TARGET_C, DEFAULT_ECO_TARGET_C))
-        boost = float(self._cfg(CONF_BOOST_TARGET_C, DEFAULT_BOOST_TARGET_C))
-        target = boost if boost_on else eco
-        if self._last_applied_target_c is not None and abs(self._last_applied_target_c - target) < 0.1:
-            _LOGGER.debug(
-                "DHWP Smart: boost target already at %.1f°C (boost=%s) — skip",
-                target, boost_on,
-            )
+        desired = float(DEFAULT_BOOST_DURATION_DAYS) if boost_on else 0.0
+        current_raw = self._get_state(bd_id)
+        try:
+            current_val = float(current_raw) if current_raw not in (None, "unknown", "unavailable") else None
+        except (TypeError, ValueError):
+            current_val = None
+        # No-op if the appliance is already at the desired state. We
+        # compare against the *appliance's* current value, not a cached
+        # local mirror, so we don't fight with manual overrides.
+        if current_val is not None and abs(current_val - desired) < 0.5:
             return
         _LOGGER.info(
-            "DHWP Smart: water_heater.set_temperature %.1f°C (boost=%s) — %s",
-            target, boost_on, self._last_decision.reason,
+            "DHWP Smart: number.set_value %s=%s (boost=%s) — %s",
+            bd_id, desired, boost_on, self._last_decision.reason,
         )
         try:
             await self.hass.services.async_call(
-                "water_heater", "set_temperature",
-                {"entity_id": wh_id, "temperature": target},
+                "number", "set_value",
+                {"entity_id": bd_id, "value": desired},
                 blocking=True,
             )
-            self._last_applied_target_c = target
         except Exception as err:                                # pragma: no cover
-            _LOGGER.warning("DHWP Smart: set_temperature failed: %s", err)
+            _LOGGER.warning("DHWP Smart: boost_duration set_value failed: %s", err)
 
     async def _finalise_yesterday(self) -> None:
         """Close yesterday's daily aggregation and fold it into the weekday pattern."""
