@@ -297,6 +297,59 @@ class TestSignalHold:
         )
         assert d.signal_switch_on is False
 
+    def test_tank_full_and_appliance_idle_releases(self, base_inputs, thr):
+        """Reproduction of 2026-05-18 14:xx state: middle at 54.2 °C
+        (within 0.5 °C of 54 target), appliance idle (9 W), strong PV
+        surplus. Without the universal "nothing to do" gate, the
+        integration would keep the contactor closed indefinitely.
+        With the gate, it releases."""
+        d = decide(
+            replace(
+                base_inputs,
+                signal_currently_on=True,
+                signal_on_at=base_inputs.now - timedelta(minutes=30),
+                heater_power_w=9.0,
+                grid_smooth_w=-1135.0,
+                tank_middle_c=54.2,
+                is_hc=False,
+            ),
+            thr,
+        )
+        assert d.signal_switch_on is False
+        assert "tank middle" in d.reason
+        assert "idle" in d.reason
+
+    def test_tank_full_but_appliance_still_drawing_keeps_running(self, base_inputs, thr):
+        # Mid-cycle, appliance is still heating: don't interrupt — let
+        # the appliance's own logic decide when to stop.
+        d = decide(
+            replace(
+                base_inputs,
+                signal_currently_on=True,
+                signal_on_at=base_inputs.now - timedelta(minutes=30),
+                heater_power_w=700.0,
+                grid_smooth_w=-1500.0,
+                tank_middle_c=54.2,
+                is_hc=False,
+            ),
+            thr,
+        )
+        assert d.signal_switch_on is True
+
+    def test_tank_full_manual_boost_still_engages(self, base_inputs, thr):
+        # MODE_BOOST is a sovereign override — user wants boost, give it.
+        d = decide(
+            replace(
+                base_inputs,
+                mode=MODE_BOOST,
+                heater_power_w=9.0,
+                tank_middle_c=54.2,
+            ),
+            thr,
+        )
+        assert d.signal_switch_on is True
+        assert d.boost_mode_on is True
+
     def test_hc_ending_with_appliance_still_drawing_no_surplus_releases(
         self, base_inputs, thr
     ):

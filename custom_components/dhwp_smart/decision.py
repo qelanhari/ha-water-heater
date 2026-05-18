@@ -128,6 +128,12 @@ class Thresholds:
     # *sustained* part; we just need an instantaneous threshold that
     # doesn't flap on transients.
     surplus_continue_margin_w: float = 200.0
+    # Tank is "essentially full" when the middle probe is within this
+    # margin of `target_top_c`. Below the appliance setpoint by less
+    # than 0.5 °C means the compressor has effectively reached target
+    # and any further runtime is futile (refer to `reference_dhwp_*`
+    # memories — middle probe is the Atlantic's actual control target).
+    tank_full_margin_c: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -228,6 +234,20 @@ def _in_signal_hold(i: Inputs, thr: Thresholds) -> bool:
     # is still drawing AND we're now actually importing, this still
     # releases correctly, preventing HP-priced grid burn.
     return i.grid_smooth_w < thr.surplus_continue_margin_w
+
+
+def _tank_essentially_full(i: Inputs, thr: Thresholds) -> bool:
+    """Middle probe is at (or past) the appliance setpoint within margin.
+
+    When True, the appliance is effectively done: its compressor stops
+    when middle reaches setpoint, and any further runtime is futile.
+    Used to prevent the integration from re-engaging the contactor after
+    the legacy `Chauffe-eau : Extinction Fin de Cycle` YAML correctly
+    opened it on power-low (5 min < 100 W).
+    """
+    if i.tank_middle_c is None:
+        return False
+    return i.tank_middle_c >= thr.target_top_c - thr.tank_full_margin_c
 
 
 def _abundant_surplus_for_boost(i: Inputs, thr: Thresholds) -> bool:
@@ -339,11 +359,29 @@ def decide(i: Inputs, thr: Thresholds) -> Decision:
 
 
 def _decide_impl(i: Inputs, thr: Thresholds) -> Decision:
-    # 1. Manual.
+    # 1. Manual: off and boost are sovereign user overrides.
     if i.mode == MODE_OFF:
         return Decision(False, False, "manual=off", "wait")
     if i.mode == MODE_BOOST:
         return Decision(True, True, "manual=boost", "boost")
+
+    # 1b. Universal "tank is essentially full + appliance has self-stopped"
+    # gate. The appliance's middle probe is at (or past) target and it
+    # has dropped below the heating power threshold (the legacy
+    # `Chauffe-eau : Extinction Fin de Cycle` YAML's exact criterion).
+    # There's nothing useful to do: keep the contactor open. Without
+    # this gate, the integration re-engages 6 s after the legacy YAML
+    # correctly turned it off (observed 2026-05-18 13:33:11) — fighting
+    # the YAML and keeping a closed contactor in front of an idle
+    # appliance for hours.
+    if _tank_essentially_full(i, thr) and i.heater_power_w < thr.heater_idle_threshold_w:
+        return Decision(
+            False, False,
+            f"tank middle {i.tank_middle_c:.1f}°C at target + appliance idle "
+            f"({i.heater_power_w:.0f} W) — nothing to do",
+            "wait",
+        )
+
     if i.mode == MODE_HC_ONLY:
         on = i.is_hc and i.energy_needed_kwh > 0
         # Honour 2h hold even in manual HC-only mode.
