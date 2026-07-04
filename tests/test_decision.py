@@ -69,6 +69,37 @@ class TestManual:
         assert d.boost_mode_on is False
 
 
+class TestHeaterNominalConfig:
+    """The start gate is sized by heater_nominal_w + surplus_safety_margin_w.
+
+    Default nominal is 800 W (nameplate); the Atlantic HP actually draws
+    ~650 W. Exporting 791 W with the heater off:
+      - nominal 800 → expected -791+800 = +9 W, not < -200 → waits
+      - nominal 650 → expected -791+650 = -141 W, still not < -200 → waits
+      - nominal 650 + margin 100 → -141 < -100 → starts
+    """
+
+    def _solar(self, base_inputs, thr, **kw):
+        return decide(
+            replace(base_inputs, mode=MODE_SOLAR_ONLY, grid_smooth_w=-791.0), thr
+        )
+
+    def test_default_nominal_800_waits_at_791w(self, base_inputs, thr):
+        d = self._solar(base_inputs, thr)
+        assert d.signal_switch_on is False
+
+    def test_nominal_650_still_waits_under_default_margin(self, base_inputs, thr):
+        d = self._solar(base_inputs, replace(thr, heater_nominal_w=650.0))
+        assert d.signal_switch_on is False
+
+    def test_nominal_650_and_margin_100_starts(self, base_inputs, thr):
+        d = self._solar(
+            base_inputs,
+            replace(thr, heater_nominal_w=650.0, surplus_safety_margin_w=100.0),
+        )
+        assert d.signal_switch_on is True
+
+
 # ----------------------------------------------------------------------------
 # 2h signal hold
 # ----------------------------------------------------------------------------

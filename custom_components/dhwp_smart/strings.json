@@ -40,6 +40,7 @@
         "description": "Cost rules, surplus thresholds, signal hold + anti-flap tuning.",
         "data": {
           "rouge_hp_blended_cap": "Tempo Rouge HP blended cap (€/kWh)",
+          "heater_nominal_w": "Heat-pump nominal draw when heating (W)",
           "surplus_safety_margin_w": "Solar surplus safety margin (W)",
           "boost_extra_surplus_w": "Extra surplus required to enable boost (W)",
           "signal_min_hold_minutes": "Signal switch min hold (minutes)",
@@ -67,6 +68,7 @@
         "title": "Smart DHWP — guardrails",
         "data": {
           "rouge_hp_blended_cap": "Tempo Rouge HP blended cap (€/kWh)",
+          "heater_nominal_w": "Heat-pump nominal draw when heating (W)",
           "surplus_safety_margin_w": "Solar surplus safety margin (W)",
           "boost_extra_surplus_w": "Extra surplus required for boost (W)",
           "signal_min_hold_minutes": "Signal switch min hold (minutes)",

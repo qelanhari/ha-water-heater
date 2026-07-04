@@ -28,6 +28,7 @@ from .const import (
     CONF_GARAGE_TEMP_ENTITY,
     CONF_GRID_POWER_ENTITY,
     CONF_HEATER_ENERGY_METER_ENTITY,
+    CONF_HEATER_NOMINAL_W,
     CONF_HEATER_POWER_ENTITY,
     CONF_MIN_DWELL_SECONDS,
     CONF_MORNING_DEADLINE_HOUR,
@@ -51,6 +52,7 @@ from .const import (
     DEFAULT_BOOST_EXTRA_SURPLUS_W,
     DEFAULT_BOOST_TARGET_C,
     DEFAULT_ECO_TARGET_C,
+    DEFAULT_HEATER_NOMINAL_W,
     DEFAULT_MIN_DWELL_SECONDS,
     DEFAULT_MORNING_DEADLINE_HOUR,
     DEFAULT_MORNING_DEADLINE_MINUTE,
@@ -116,6 +118,8 @@ def _guardrails_schema(prev: dict[str, Any] | None = None) -> vol.Schema:
     return vol.Schema({
         vol.Required(CONF_ROUGE_HP_BLENDED_CAP, default=p.get(CONF_ROUGE_HP_BLENDED_CAP, DEFAULT_ROUGE_HP_BLENDED_CAP)):
             NumberSelector(NumberSelectorConfig(min=0.05, max=0.3, step=0.001, mode=NumberSelectorMode.BOX)),
+        vol.Required(CONF_HEATER_NOMINAL_W, default=p.get(CONF_HEATER_NOMINAL_W, DEFAULT_HEATER_NOMINAL_W)):
+            NumberSelector(NumberSelectorConfig(min=100, max=3000, step=10, mode=NumberSelectorMode.BOX)),
         vol.Required(CONF_SURPLUS_SAFETY_MARGIN_W, default=p.get(CONF_SURPLUS_SAFETY_MARGIN_W, DEFAULT_SURPLUS_SAFETY_MARGIN_W)):
             NumberSelector(NumberSelectorConfig(min=0, max=2000, step=10, mode=NumberSelectorMode.BOX)),
         vol.Required(CONF_BOOST_EXTRA_SURPLUS_W, default=p.get(CONF_BOOST_EXTRA_SURPLUS_W, DEFAULT_BOOST_EXTRA_SURPLUS_W)):

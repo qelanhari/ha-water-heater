@@ -24,6 +24,7 @@ from .const import (
     CONF_GARAGE_TEMP_ENTITY,
     CONF_GRID_POWER_ENTITY,
     CONF_HEATER_ENERGY_METER_ENTITY,
+    CONF_HEATER_NOMINAL_W,
     CONF_HEATER_POWER_ENTITY,
     CONF_MIN_DWELL_SECONDS,
     CONF_MORNING_DEADLINE_HOUR,
@@ -50,6 +51,7 @@ from .const import (
     DEFAULT_BOOST_DURATION_DAYS,
     DEFAULT_BOOST_DURATION_ENTITY,
     DEFAULT_ECO_TARGET_C,
+    DEFAULT_HEATER_NOMINAL_W,
     DEFAULT_MIN_DWELL_SECONDS,
     DEFAULT_MORNING_DEADLINE_HOUR,
     DEFAULT_MORNING_DEADLINE_MINUTE,
@@ -145,6 +147,9 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             morning_window_end=time(
                 int(self._cfg(CONF_MORNING_DEADLINE_HOUR, DEFAULT_MORNING_DEADLINE_HOUR)),
                 int(self._cfg(CONF_MORNING_DEADLINE_MINUTE, DEFAULT_MORNING_DEADLINE_MINUTE)),
+            ),
+            heater_nominal_w=float(
+                self._cfg(CONF_HEATER_NOMINAL_W, DEFAULT_HEATER_NOMINAL_W)
             ),
             surplus_safety_margin_w=float(
                 self._cfg(CONF_SURPLUS_SAFETY_MARGIN_W, DEFAULT_SURPLUS_SAFETY_MARGIN_W)

@@ -52,7 +52,10 @@ MODE_SOLAR_ONLY = "solar_only"
 MODES: tuple[str, ...] = (MODE_AUTO, MODE_OFF, MODE_BOOST, MODE_HC_ONLY, MODE_SOLAR_ONLY)
 MANUAL_MODES: frozenset[str] = frozenset({MODE_OFF, MODE_BOOST, MODE_HC_ONLY, MODE_SOLAR_ONLY})
 
-# Heat-pump nominal consumption in W. Used to size the surplus check.
+# Heat-pump nominal consumption in W. Used as the fallback when no
+# per-install value is configured; the real draw is a `Thresholds` field
+# (`heater_nominal_w`) so it can be tuned to the actual appliance. The
+# Atlantic DHWP heat pump typically draws ~650 W, not the 800 W nameplate.
 HEATER_NOMINAL_W: float = 800.0
 
 
@@ -85,6 +88,11 @@ class Thresholds:
     target_top_c: float = 54.0
     morning_window_start: time = time(4, 0)
     morning_window_end: time = time(7, 0)
+    # Actual heat-pump draw in W when heating. Sizes the surplus start gate:
+    # to START solar heating we need grid export ≥ heater_nominal_w +
+    # surplus_safety_margin_w. Default mirrors HEATER_NOMINAL_W (800 W
+    # nameplate); the Atlantic DHWP heat pump commonly draws ~650 W.
+    heater_nominal_w: float = HEATER_NOMINAL_W
     surplus_safety_margin_w: float = 200.0
     rouge_hp_blended_cap_eur_per_kwh: float = 0.118125  # 0.75 × Rouge HC
     sunny_forecast_safety_factor: float = 1.5
@@ -157,14 +165,14 @@ def _in_morning_window(now: datetime, thr: Thresholds) -> bool:
 def _surplus_covers_heater(i: Inputs, thr: Thresholds) -> bool:
     """Solar surplus large enough to run the heater without pulling from grid?
 
-    The heater is either off (heater_power_w ≈ 0) or running (~800 W).
-    Either way, the check is: "if we add HEATER_NOMINAL_W of load, does the
+    The heater is either off (heater_power_w ≈ 0) or running (~heater_nominal_w).
+    Either way, the check is: "if we add heater_nominal_w of load, does the
     grid stay in export with the safety margin?"
 
-    expected_grid_after = grid_smooth + (HEATER_NOMINAL_W - heater_power_w)
+    expected_grid_after = grid_smooth + (heater_nominal_w - heater_power_w)
                        < -safety_margin
     """
-    delta = HEATER_NOMINAL_W - i.heater_power_w
+    delta = thr.heater_nominal_w - i.heater_power_w
     expected = i.grid_smooth_w + delta
     return expected < -thr.surplus_safety_margin_w
 
@@ -254,7 +262,7 @@ def _abundant_surplus_for_boost(i: Inputs, thr: Thresholds) -> bool:
     """Surplus exceeds heater draw by *a lot* — safe to bump the target to 55°C."""
     # If the heater is already on we know its draw exactly; if not, assume
     # nominal. Need grid + delta < -(margin + boost_extra).
-    delta = HEATER_NOMINAL_W - i.heater_power_w
+    delta = thr.heater_nominal_w - i.heater_power_w
     expected = i.grid_smooth_w + delta
     return expected < -(thr.surplus_safety_margin_w + thr.boost_extra_surplus_w)
 
@@ -457,7 +465,7 @@ def _decide_impl(i: Inputs, thr: Thresholds) -> Decision:
     if i.tempo_color == "Rouge" and not i.is_hc:
         # Once we commit signal_switch on Rouge HP, we're stuck for 2h.
         # Worst case: the entire 2h is HP price (cloud cover).
-        worst_case_kwh = HEATER_NOMINAL_W * 2.0 / 1000.0  # 2 h at 800 W
+        worst_case_kwh = thr.heater_nominal_w * 2.0 / 1000.0  # 2 h at nominal draw
         worst_case_ok = can_still_meet_blended_cap(
             i.cycle,
             worst_case_kwh,
