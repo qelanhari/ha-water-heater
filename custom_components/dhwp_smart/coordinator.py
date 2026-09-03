@@ -87,8 +87,8 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass, _LOGGER, name=DOMAIN,
             update_interval=timedelta(seconds=UPDATE_INTERVAL_SECONDS),
+            config_entry=entry,
         )
-        self.config_entry = entry
         self._store: Store = Store(hass, STORAGE_VERSION, _storage_key(entry.entry_id))
         self._unsub: list[Any] = []
 

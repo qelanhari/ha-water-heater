@@ -8,7 +8,7 @@ import voluptuous as vol
 from homeassistant.config_entries import (
     ConfigFlow,
     ConfigFlowResult,
-    OptionsFlowWithConfigEntry,
+    OptionsFlow,
 )
 from homeassistant.const import CONF_NAME
 from homeassistant.helpers.selector import (
@@ -167,10 +167,10 @@ class DhwpSmartConfigFlow(ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     def async_get_options_flow(config_entry):
-        return DhwpSmartOptionsFlow(config_entry)
+        return DhwpSmartOptionsFlow()
 
 
-class DhwpSmartOptionsFlow(OptionsFlowWithConfigEntry):
+class DhwpSmartOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
         return await self.async_step_tank()
 
