@@ -7,19 +7,22 @@ configured contactor entity.
 Priority chain (top wins):
 
 1. Manual mode (off / hc_only / solar_only / boost) — sovereign.
-2. Hard floor breach in the morning window — force ON regardless of cost.
-3. Tempo Rouge HP — solar OK only if the worst-case projected blended
+2. Tempo Rouge HP — solar OK only if the worst-case projected blended
    cost stays under `rouge_hp_blended_cap_eur_per_kwh`. Otherwise OFF.
-4. HC window — only at three checkpoints (22:30 rescue, 01:00 main,
+3. HC window — only at three checkpoints (22:30 rescue, 01:00 main,
    03:30 last-chance). 22:30 fires only on a depleted tank; 01:00 on
    tank-middle below floor OR poor tomorrow forecast OR very cold outdoor;
-   03:30 catches under-heated tanks (e.g. forecast revised cloudier).
-   Outside the checkpoints, never start a HC cycle.
-5. HP window (sunny day, not Rouge) — ON if:
+   03:30 is the morning-floor safety net: heats if the tank, cooled until
+   HC end, would be below `hard_floor_c`. Outside the checkpoints, never
+   start a HC cycle.
+4. HP window (sunny day, not Rouge) — ON if:
      - smoothed grid surplus covers heater consumption with margin, AND
      - forecast says today's PV will comfortably cover remaining need
        (so we don't waste cheap HC on something solar will do for free).
-6. Otherwise — OFF (wait).
+5. Otherwise — OFF (wait).
+
+Auto mode never starts a cycle on HP grid: a tank below the floor after
+HC ends waits for solar or the next HC window (2026-10-08 incident).
 """
 
 from __future__ import annotations
@@ -84,10 +87,8 @@ class Inputs:
 
 @dataclass(frozen=True)
 class Thresholds:
-    hard_floor_c: float = 48.0
+    hard_floor_c: float = 48.0                # tank middle floor at HC end
     target_top_c: float = 54.0
-    morning_window_start: time = time(4, 0)
-    morning_window_end: time = time(7, 0)
     # Actual heat-pump draw in W when heating. Sizes the surplus start gate:
     # to START solar heating we need grid export ≥ heater_nominal_w +
     # surplus_safety_margin_w. Default mirrors HEATER_NOMINAL_W (800 W
@@ -110,10 +111,15 @@ class Thresholds:
     hc_main_time: time = time(1, 0)
     hc_last_chance_time: time = time(3, 30)
     hc_checkpoint_tolerance_min: int = 5
-    # Tank-middle floors used by the three checkpoints.
+    # End of the Tempo HC window; the 03:30 checkpoint projects the tank
+    # middle down to this instant at `overnight_cooldown_c_per_h`.
+    hc_end_time: time = time(6, 0)
+    # Observed passive loss of the tank middle overnight (0.5 °C/h on
+    # 2026-10-07/08; ~0.4 °C/h in summer). Errs on the pessimistic side.
+    overnight_cooldown_c_per_h: float = 0.5
+    # Tank-middle floors used by the 22:30 and 01:00 checkpoints.
     hc_rescue_floor_c: float = 42.0       # 22:30: only if tank is depleted
     hc_main_floor_c: float = 48.0         # 01:00: main nightly top-up
-    hc_last_chance_floor_c: float = 47.0  # 03:30: catches forecast revisions
     # Outdoor coldness bonus — below this we lack data, so heat as a hedge.
     hc_cold_outdoor_c: float = 5.0
     # Heater self-idle detection. The Atlantic DHWP draws ~800 W when
@@ -155,11 +161,6 @@ class Decision:
 # Legacy alias for backwards compat in callers that only check on/off:
 def heater_on(d: Decision) -> bool:
     return d.signal_switch_on
-
-
-def _in_morning_window(now: datetime, thr: Thresholds) -> bool:
-    t = now.time()
-    return thr.morning_window_start <= t <= thr.morning_window_end
 
 
 def _surplus_covers_heater(i: Inputs, thr: Thresholds) -> bool:
@@ -276,12 +277,38 @@ def _near(now_t: time, target: time, tol_min: int) -> bool:
     return abs(n - t) <= tol_min
 
 
+def _projected_middle_at_hc_end(i: Inputs, thr: Thresholds) -> float | None:
+    """Tank middle expected at `hc_end_time` from passive cooldown alone.
+
+    None when the middle probe is unavailable — a missing reading must not
+    be treated as 0 °C (bug B2).
+    """
+    if i.tank_middle_c is None:
+        return None
+    end = datetime.combine(i.now.date(), thr.hc_end_time, tzinfo=i.now.tzinfo)
+    if end < i.now:
+        end += timedelta(days=1)
+    hours = (end - i.now).total_seconds() / 3600.0
+    return i.tank_middle_c - thr.overnight_cooldown_c_per_h * hours
+
+
 def _hc_checkpoint_action(i: Inputs, thr: Thresholds) -> Decision | None:
-    """Return a heat_hc Decision iff the current time matches one of the
+    """Return a heating Decision iff the current time matches one of the
     three HC checkpoints AND its condition is met. Otherwise None."""
     now_t = i.now.time()
-    mid = i.tank_middle_c if i.tank_middle_c is not None else 0.0
-    outdoor_cold = i.outdoor_c is not None and i.outdoor_c < thr.hc_cold_outdoor_c
+    if i.tank_middle_c is not None:
+        mid = i.tank_middle_c
+    else:
+        # Probe unavailable: let the top-based budget decide.
+        mid = 0.0 if i.energy_needed_kwh > 0 else float("inf")
+    # The 01:00 hedges below need a positive budget; the floor checks don't —
+    # the budget comes from the top probe, which stays at target while the
+    # middle cools below the floor (2026-10-08: budget 0, middle 47.9 °C).
+    outdoor_cold = (
+        i.energy_needed_kwh > 0
+        and i.outdoor_c is not None
+        and i.outdoor_c < thr.hc_cold_outdoor_c
+    )
     tomorrow_will_cover = will_likely_cover_heating_need(
         i.forecast_tomorrow_kwh,
         i.energy_needed_kwh,
@@ -326,12 +353,16 @@ def _hc_checkpoint_action(i: Inputs, thr: Thresholds) -> Decision | None:
         return None
 
     if _near(now_t, thr.hc_last_chance_time, thr.hc_checkpoint_tolerance_min):
-        if mid < thr.hc_last_chance_floor_c:
+        # Last start whose 2 h hold still ends inside HC. Anything the
+        # tank lacks at 06:00 must be fixed now: auto never heats on HP.
+        projected = _projected_middle_at_hc_end(i, thr)
+        if projected is not None and projected < thr.hard_floor_c:
             return Decision(
                 True, False,
-                f"HC 03:30 last chance · tank_middle {mid:.1f}°C < "
-                f"{thr.hc_last_chance_floor_c:.0f}°C",
-                "heat_hc",
+                f"HC 03:30 last chance · tank_middle {mid:.1f}°C → "
+                f"{projected:.1f}°C at {thr.hc_end_time:%H:%M} < "
+                f"{thr.hard_floor_c:.0f}°C floor",
+                "hard_floor",
             )
         return None
 
@@ -423,22 +454,6 @@ def _decide_impl(i: Inputs, thr: Thresholds) -> Decision:
             )
         return Decision(False, False, "manual=solar_only · insufficient surplus", "wait")
 
-    # 2. Hard floor breach — non-negotiable safety net.
-    # Skip the check entirely if the floor sensor is unavailable, rather
-    # than treating a missing reading as 0 °C (which would force heat all
-    # morning, every morning).
-    if (
-        i.tank_middle_c is not None
-        and i.tank_middle_c < thr.hard_floor_c
-        and _in_morning_window(i.now, thr)
-    ):
-        return Decision(
-            True, False,  # boost off — eco is enough for safety
-            f"hard floor breach: tank_middle {i.tank_middle_c:.1f}°C < "
-            f"{thr.hard_floor_c:.0f}°C in morning window",
-            "hard_floor",
-        )
-
     # If we're inside the 2h signal hold, we cannot turn off — but boost is
     # still freely toggleable. Pick the best surplus-aware action.
     if _in_signal_hold(i, thr):
@@ -461,7 +476,7 @@ def _decide_impl(i: Inputs, thr: Thresholds) -> Decision:
             action,
         )
 
-    # 3. Tempo Rouge HP — blended-cost guard. Solar-only, with worst-case projection.
+    # 2. Tempo Rouge HP — blended-cost guard. Solar-only, with worst-case projection.
     if i.tempo_color == "Rouge" and not i.is_hc:
         # Once we commit signal_switch on Rouge HP, we're stuck for 2h.
         # Worst case: the entire 2h is HP price (cloud cover).
@@ -480,7 +495,7 @@ def _decide_impl(i: Inputs, thr: Thresholds) -> Decision:
             )
         return Decision(False, False, "Rouge HP · not safe (blended cap or no surplus)", "wait")
 
-    # 4. HC window — three time-gated checkpoints, never else.
+    # 3. HC window — three time-gated checkpoints, never else.
     #
     # Empirical cooldown rate (10 days, 267 quiet 3 h windows): ≈0.4 °C/h
     # almost flat across outdoor 9–38 °C. So a single middle-tank floor of
@@ -492,19 +507,19 @@ def _decide_impl(i: Inputs, thr: Thresholds) -> Decision:
     # finishes at 00:00 and leaves the tank to passively lose ~2.5 °C
     # before morning use. Pushing the main checkpoint to 01:00 puts the
     # cycle end at 03:00 — minimal cooldown before 06:00.
-    if i.is_hc and i.energy_needed_kwh > 0:
+    if i.is_hc:
         action = _hc_checkpoint_action(i, thr)
         if action is not None:
             return action
-        return Decision(
-            False, False,
-            "HC window · no checkpoint matched — let solar do it tomorrow",
-            "wait",
-        )
-    if i.is_hc:
+        if i.energy_needed_kwh > 0:
+            return Decision(
+                False, False,
+                "HC window · no checkpoint matched — let solar do it tomorrow",
+                "wait",
+            )
         return Decision(False, False, "HC window · tank already full", "wait")
 
-    # 5. HP window, not Rouge. Solar-only candidate.
+    # 4. HP window, not Rouge. Solar-only candidate.
     if _surplus_covers_heater(i, thr):
         forecast_says_cover = will_likely_cover_heating_need(
             i.forecast_today_kwh,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -143,11 +143,6 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return Thresholds(
             hard_floor_c=float(self._cfg(CONF_TANK_MORNING_FLOOR_C, DEFAULT_TANK_MORNING_FLOOR_C)),
             target_top_c=float(self._cfg(CONF_TANK_TARGET_TOP_C, DEFAULT_TANK_TARGET_TOP_C)),
-            morning_window_start=time(4, 0),
-            morning_window_end=time(
-                int(self._cfg(CONF_MORNING_DEADLINE_HOUR, DEFAULT_MORNING_DEADLINE_HOUR)),
-                int(self._cfg(CONF_MORNING_DEADLINE_MINUTE, DEFAULT_MORNING_DEADLINE_MINUTE)),
-            ),
             heater_nominal_w=float(
                 self._cfg(CONF_HEATER_NOMINAL_W, DEFAULT_HEATER_NOMINAL_W)
             ),
@@ -323,9 +318,9 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         # dt_util.now() returns a timezone-aware datetime in HA's configured
         # timezone — so `now.time()` is local time-of-day, which is what the
-        # morning-window threshold means. (Previously we used
-        # `datetime.now(timezone.utc)` which made the morning window fire
-        # in UTC, i.e. 2 hours late in CEST.)
+        # HC checkpoint times mean. (Previously we used
+        # `datetime.now(timezone.utc)` which made time gates fire in UTC,
+        # i.e. 2 hours late in CEST.)
         now = dt_util.now()
         local_now = now
 

@@ -8,7 +8,7 @@ v0.2.0 introduces:
 """
 
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from cost import CycleAccumulator  # type: ignore[import-not-found]
 from decision import (  # type: ignore[import-not-found]
@@ -133,22 +133,6 @@ class TestSignalHold:
             thr,
         )
         assert d.signal_switch_on is False
-
-    def test_hold_does_not_prevent_hard_floor(self, base_inputs, thr):
-        # Hard floor breach takes priority before the hold check (and the
-        # boost flag stays off since hard floor is a safety, not a boost).
-        morning = datetime(2026, 6, 16, 5, 0, 0, tzinfo=timezone.utc)
-        d = decide(
-            replace(
-                base_inputs,
-                now=morning,
-                tank_middle_c=45.0,   # below 48 floor
-                signal_currently_on=True,
-                signal_on_at=morning - timedelta(minutes=30),
-            ),
-            thr,
-        )
-        assert d.action == "hard_floor"
 
     def test_during_hold_boost_is_frozen(self, base_inputs, thr):
         """Mid-cycle the boost flag must NOT change, regardless of surplus.
@@ -410,28 +394,48 @@ class TestSignalHold:
 
 
 class TestHardFloor:
-    def test_breach_in_morning_forces_on(self, base_inputs, thr):
-        morning = datetime(2026, 6, 16, 5, 0, 0, tzinfo=timezone.utc)
+    """The morning floor is enforced inside HC only (03:30 projection);
+    auto mode never starts a cycle on HP grid."""
+
+    @staticmethod
+    def _at(base, hour, minute, **kw):
+        return replace(base, now=base.now.replace(hour=hour, minute=minute), **kw)
+
+    def test_below_floor_after_hc_does_not_heat_on_grid(self, base_inputs, thr):
+        """2026-10-08 06:06: HC over, middle 47.9 °C, no sun → must wait."""
         d = decide(
-            replace(base_inputs, now=morning, tank_middle_c=45.0),
+            self._at(base_inputs, 6, 6, is_hc=False, tank_middle_c=47.9,
+                     grid_smooth_w=300.0, energy_needed_kwh=0.0),
             thr,
         )
-        assert d.signal_switch_on is True
-        assert d.action == "hard_floor"
-        assert d.boost_mode_on is False   # safety only, no boost
+        assert d.signal_switch_on is False
 
-    def test_breach_outside_morning_no_override(self, base_inputs, thr):
-        d = decide(replace(base_inputs, tank_middle_c=45.0), thr)
-        assert d.action != "hard_floor"
+    def test_03h30_projected_below_floor_fires(self, base_inputs, thr):
+        """2026-10-08 03:30: middle 49.0 °C, top-based budget 0 kWh →
+        49.0 − 2.5 h × 0.5 °C/h = 47.75 °C at 06:00 < 48 °C."""
+        d = decide(
+            self._at(base_inputs, 3, 30, is_hc=True, tank_middle_c=49.0,
+                     energy_needed_kwh=0.0),
+            thr,
+        )
+        assert (d.signal_switch_on, d.action) == (True, "hard_floor")
+
+    def test_03h30_projected_above_floor_does_not_fire(self, base_inputs, thr):
+        d = decide(
+            self._at(base_inputs, 3, 30, is_hc=True, tank_middle_c=49.5,
+                     energy_needed_kwh=0.0),
+            thr,
+        )
+        assert d.signal_switch_on is False
 
     def test_missing_tank_middle_does_not_breach(self, base_inputs, thr):
         """Sensor unavailable (None) must NOT be treated as 0 °C — was bug B2."""
-        morning = datetime(2026, 6, 16, 5, 0, 0, tzinfo=timezone.utc)
         d = decide(
-            replace(base_inputs, now=morning, tank_middle_c=None),
+            self._at(base_inputs, 3, 30, is_hc=True, tank_middle_c=None,
+                     energy_needed_kwh=0.0),
             thr,
         )
-        assert d.action != "hard_floor"
+        assert d.signal_switch_on is False
 
 
 # ----------------------------------------------------------------------------
@@ -526,12 +530,10 @@ class TestHcWindow:
         assert d.signal_switch_on is False
 
     def test_05h00_after_last_chance_does_not_fire(self, base_inputs, thr):
-        # Too late — a 2h cycle would push into HP.
-        # Mid above hard-floor (48 °C) so the morning-window hard-floor
-        # safety net (branch 2) doesn't pre-empt this check.
+        # Too late — a 2h cycle would push into HP, even below the floor.
         d = decide(
             self._at(base_inputs, 5, 0,
-                     tank_middle_c=49.0, energy_needed_kwh=2.0),
+                     tank_middle_c=46.0, energy_needed_kwh=2.0),
             thr,
         )
         assert d.signal_switch_on is False
@@ -613,6 +615,33 @@ class TestHcWindow:
         assert d.signal_switch_on is True
         assert "winter" in d.reason.lower() or "outdoor" in d.reason.lower()
 
+    def test_01h00_below_floor_fires_with_zero_budget(self, base_inputs, thr):
+        # Top probe at target → budget 0, but the middle is below the floor.
+        d = decide(
+            self._at(base_inputs, 1, 0,
+                     tank_middle_c=47.0, energy_needed_kwh=0.0),
+            thr,
+        )
+        assert d.signal_switch_on is True
+
+    def test_01h00_cold_outdoor_needs_budget(self, base_inputs, thr):
+        d = decide(
+            self._at(base_inputs, 1, 0,
+                     tank_middle_c=50.0, energy_needed_kwh=0.0, outdoor_c=2.0),
+            thr,
+        )
+        assert d.signal_switch_on is False
+
+    def test_22h30_missing_middle_with_zero_budget_does_not_fire(
+        self, base_inputs, thr,
+    ):
+        d = decide(
+            self._at(base_inputs, 22, 30,
+                     tank_middle_c=None, energy_needed_kwh=0.0),
+            thr,
+        )
+        assert d.signal_switch_on is False
+
     # --- 03:30 last chance ----------------------------------------------------
 
     def test_03h30_still_below_floor_fires(self, base_inputs, thr):
@@ -629,7 +658,7 @@ class TestHcWindow:
     def test_03h30_tank_already_ok_does_not_fire(self, base_inputs, thr):
         d = decide(
             self._at(base_inputs, 3, 30,
-                     tank_middle_c=49.0, energy_needed_kwh=1.0),
+                     tank_middle_c=49.5, energy_needed_kwh=1.0),
             thr,
         )
         assert d.signal_switch_on is False

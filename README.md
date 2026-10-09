@@ -45,21 +45,22 @@ Under a single device "Smart DHWP":
 - `sensor.dhwp_smart_forecast_today` — Forecast.Solar pass-through.
 - `sensor.dhwp_smart_pattern_samples` — observations folded into the model.
 - `binary_sensor.dhwp_smart_heating_now` — contactor on.
-- `binary_sensor.dhwp_smart_hard_floor_breach` — currently below the floor in the morning window.
+- `binary_sensor.dhwp_smart_hard_floor_breach` — the 03:30 HC cycle fired to keep the morning floor.
 - `button.dhwp_smart_force_heat` — fire a one-shot boost.
 - `button.dhwp_smart_reset_patterns` — clear learned weekday EMAs.
 
 ## Decision priority
 
 1. **Manual mode** wins (off / boost / hc_only / solar_only).
-2. **Hard floor breach** in the 04:00–06:30 window → force on.
-3. **Tempo Rouge HP**: solar excess is allowed *only* if the cycle's
+2. **Tempo Rouge HP**: solar excess is allowed *only* if the cycle's
    worst-case blended cost (next 15 min projected at full HP price) still
    stays under 0.118 €/kWh.
-4. **HC window**: on if any energy is still needed before morning.
-5. **HP window, non-Rouge**: solar surplus + sunny forecast ⇒ on.
+3. **HC window**: checkpoints at 22:30 (depleted tank), 01:00 (middle below
+   floor, poor forecast or cold night) and 03:30 (middle projected below the
+   morning floor at 06:00). The 03:30 cycle is the last one that ends in HC.
+4. **HP window, non-Rouge**: solar surplus + sunny forecast ⇒ on.
    Surplus + cloudy forecast ⇒ wait for HC.
-6. Otherwise off.
+5. Otherwise off.
 
 ## Setup
 
