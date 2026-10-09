@@ -12,11 +12,11 @@ from datetime import timedelta
 
 from cost import CycleAccumulator  # type: ignore[import-not-found]
 from decision import (  # type: ignore[import-not-found]
-    MODE_AUTO,
     MODE_BOOST,
     MODE_HC_ONLY,
     MODE_OFF,
     MODE_SOLAR_ONLY,
+    abundant_surplus_for_boost,
     decide,
 )
 
@@ -56,7 +56,8 @@ class TestManual:
         # Surplus must exceed heater_W + safety + boost_extra (200+1000=1200).
         # Heater off → delta = 800. Need grid + 800 < -1200 → grid < -2000.
         d = decide(
-            replace(base_inputs, mode=MODE_SOLAR_ONLY, grid_smooth_w=-2500.0), thr
+            replace(base_inputs, mode=MODE_SOLAR_ONLY, grid_smooth_w=-2500.0,
+                    abundant_surplus_minutes=15.0), thr
         )
         assert d.signal_switch_on is True
         assert d.boost_mode_on is True
@@ -145,7 +146,7 @@ class TestSignalHold:
         )
         # Boost was OFF when cycle started → stays OFF even with huge surplus.
         d_off_to_high = decide(
-            replace(base_inputs, grid_smooth_w=-2500.0,
+            replace(base_inputs, grid_smooth_w=-2500.0, abundant_surplus_minutes=15.0,
                     boost_currently_on=False, **in_hold),
             thr,
         )
@@ -167,6 +168,7 @@ class TestSignalHold:
             replace(base_inputs,
                     signal_currently_on=False,        # last observed state
                     grid_smooth_w=-2500.0,            # huge surplus
+                    abundant_surplus_minutes=15.0,    # held long enough
                     is_hc=False,                       # HP solar path
                     forecast_today_kwh=15.0, energy_needed_kwh=3.0),
             thr,
@@ -727,6 +729,7 @@ class TestHpSolar:
             replace(
                 base_inputs, is_hc=False, grid_smooth_w=-2500.0,
                 forecast_today_kwh=15.0, energy_needed_kwh=3.0,
+                abundant_surplus_minutes=15.0,
             ),
             thr,
         )
@@ -744,3 +747,71 @@ class TestHpSolar:
         )
         assert d.signal_switch_on is True
         assert d.boost_mode_on is False
+
+
+# ----------------------------------------------------------------------------
+# Daily solar boost (55 °C)
+# ----------------------------------------------------------------------------
+
+
+class TestDailyBoost:
+    """Steady abundant surplus → boost once a day while middle ≤ 54 °C;
+    again only if middle drops below 45 °C."""
+
+    @staticmethod
+    def _sunny(base, **kw):
+        return replace(
+            base, is_hc=False, grid_smooth_w=-2500.0,
+            abundant_surplus_minutes=15.0, energy_needed_kwh=0.0, **kw,
+        )
+
+    def test_full_tank_starts_boost_cycle(self, base_inputs, thr):
+        # 54 °C middle + idle is "full" for eco, but boost can still add 1 °C.
+        d = decide(self._sunny(base_inputs, tank_middle_c=54.0), thr)
+        assert (d.signal_switch_on, d.boost_mode_on) == (True, True)
+
+    def test_transient_surplus_does_not_boost(self, base_inputs, thr):
+        d = decide(
+            replace(self._sunny(base_inputs), abundant_surplus_minutes=5.0), thr,
+        )
+        assert d.boost_mode_on is False
+
+    def test_above_54_does_not_boost(self, base_inputs, thr):
+        d = decide(self._sunny(base_inputs, tank_middle_c=54.2), thr)
+        assert d.signal_switch_on is False
+
+    def test_second_boost_blocked_above_45(self, base_inputs, thr):
+        d = decide(self._sunny(base_inputs, tank_middle_c=50.0, boosts_today=1), thr)
+        assert (d.signal_switch_on, d.boost_mode_on) == (True, False)
+
+    def test_second_boost_allowed_below_45(self, base_inputs, thr):
+        d = decide(self._sunny(base_inputs, tank_middle_c=44.0, boosts_today=1), thr)
+        assert d.boost_mode_on is True
+
+    def test_boost_cycle_not_cut_before_55(self, base_inputs, thr):
+        # Appliance boosted, middle 54.2 °C, compressor not yet drawing.
+        d = decide(
+            self._sunny(base_inputs, tank_middle_c=54.2, boosts_today=1,
+                        boost_currently_on=True, signal_currently_on=True,
+                        signal_on_at=base_inputs.now - timedelta(minutes=2)),
+            thr,
+        )
+        assert d.signal_switch_on is True
+
+    def test_boost_cycle_released_at_55(self, base_inputs, thr):
+        d = decide(
+            self._sunny(base_inputs, tank_middle_c=54.8, boosts_today=1,
+                        boost_currently_on=True, signal_currently_on=True,
+                        signal_on_at=base_inputs.now - timedelta(minutes=90)),
+            thr,
+        )
+        assert d.signal_switch_on is False
+
+    def test_missing_middle_does_not_boost(self, base_inputs, thr):
+        d = decide(self._sunny(base_inputs, tank_middle_c=None), thr)
+        assert d.boost_mode_on is False
+
+    def test_abundant_surplus_threshold(self, thr):
+        # heater off: grid + 800 < -1200 ⇔ grid < -2000.
+        assert abundant_surplus_for_boost(-2100.0, 0.0, thr) is True
+        assert abundant_surplus_for_boost(-1900.0, 0.0, thr) is False

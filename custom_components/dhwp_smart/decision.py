@@ -83,6 +83,8 @@ class Inputs:
     signal_on_at: datetime | None             # when the signal switch was turned on, or None
     signal_currently_on: bool = False         # observed contactor state
     boost_currently_on: bool = False          # observed appliance target == boost target
+    boosts_today: int = 0                     # boost engagements since local midnight
+    abundant_surplus_minutes: float = 0.0     # how long boost-level surplus has held
 
 
 @dataclass(frozen=True)
@@ -102,8 +104,14 @@ class Thresholds:
     # mirrors that commitment so we don't issue futile turn_off requests.
     signal_min_hold_minutes: int = 120
     # Boost mode (55°C target instead of 54°C) is opportunistic: applied
-    # when surplus comfortably exceeds the heater's draw by this much.
+    # when surplus has exceeded the heater's draw by this much for
+    # `boost_steady_minutes`. Once a day while the middle is at most
+    # `boost_max_start_c`; again only if it drops below `boost_repeat_below_c`.
     boost_extra_surplus_w: float = 1000.0
+    boost_target_c: float = 55.0
+    boost_steady_minutes: float = 10.0
+    boost_max_start_c: float = 54.0
+    boost_repeat_below_c: float = 45.0
     # HC checkpoint times (local time of day). The decision module never
     # starts a new HC cycle outside these instants; it relies on the
     # coordinator running at least once near each. ±5 min tolerance.
@@ -248,6 +256,8 @@ def _in_signal_hold(i: Inputs, thr: Thresholds) -> bool:
 def _tank_essentially_full(i: Inputs, thr: Thresholds) -> bool:
     """Middle probe is at (or past) the appliance setpoint within margin.
 
+    The setpoint is `boost_target_c` while boost is active on the appliance.
+
     When True, the appliance is effectively done: its compressor stops
     when middle reaches setpoint, and any further runtime is futile.
     Used to prevent the integration from re-engaging the contactor after
@@ -256,16 +266,33 @@ def _tank_essentially_full(i: Inputs, thr: Thresholds) -> bool:
     """
     if i.tank_middle_c is None:
         return False
-    return i.tank_middle_c >= thr.target_top_c - thr.tank_full_margin_c
+    target = thr.boost_target_c if i.boost_currently_on else thr.target_top_c
+    return i.tank_middle_c >= target - thr.tank_full_margin_c
 
 
-def _abundant_surplus_for_boost(i: Inputs, thr: Thresholds) -> bool:
-    """Surplus exceeds heater draw by *a lot* — safe to bump the target to 55°C."""
-    # If the heater is already on we know its draw exactly; if not, assume
-    # nominal. Need grid + delta < -(margin + boost_extra).
-    delta = thr.heater_nominal_w - i.heater_power_w
-    expected = i.grid_smooth_w + delta
+def abundant_surplus_for_boost(
+    grid_smooth_w: float, heater_power_w: float, thr: Thresholds,
+) -> bool:
+    """Surplus exceeds heater draw by *a lot* right now.
+
+    If the heater is already on we know its draw exactly; if not, assume
+    nominal. Need grid + delta < -(margin + boost_extra). The coordinator
+    times how long this holds (`Inputs.abundant_surplus_minutes`).
+    """
+    expected = grid_smooth_w + thr.heater_nominal_w - heater_power_w
     return expected < -(thr.surplus_safety_margin_w + thr.boost_extra_surplus_w)
+
+
+def _boost_wanted(i: Inputs, thr: Thresholds) -> bool:
+    """Steady abundant surplus AND the daily boost budget allows it:
+    first boost of the day while middle ≤ 54 °C, a repeat only below 45 °C."""
+    if i.abundant_surplus_minutes < thr.boost_steady_minutes:
+        return False
+    if i.tank_middle_c is None:
+        return False
+    if i.boosts_today == 0:
+        return i.tank_middle_c <= thr.boost_max_start_c
+    return i.tank_middle_c < thr.boost_repeat_below_c
 
 
 def _near(now_t: time, target: time, tol_min: int) -> bool:
@@ -413,7 +440,12 @@ def _decide_impl(i: Inputs, thr: Thresholds) -> Decision:
     # correctly turned it off (observed 2026-05-18 13:33:11) — fighting
     # the YAML and keeping a closed contactor in front of an idle
     # appliance for hours.
-    if _tank_essentially_full(i, thr) and i.heater_power_w < thr.heater_idle_threshold_w:
+    # A wanted boost bypasses it: a 54 °C tank is "full" but can go to 55 °C.
+    if (
+        _tank_essentially_full(i, thr)
+        and i.heater_power_w < thr.heater_idle_threshold_w
+        and not _boost_wanted(i, thr)
+    ):
         return Decision(
             False, False,
             f"tank middle {i.tank_middle_c:.1f}°C at target + appliance idle "
@@ -441,14 +473,14 @@ def _decide_impl(i: Inputs, thr: Thresholds) -> Decision:
         if _in_signal_hold(i, thr):
             return Decision(
                 True,
-                _abundant_surplus_for_boost(i, thr),
+                _boost_wanted(i, thr),
                 "manual=solar_only · 2h signal hold",
                 "heat_solar",
             )
         if has_surplus:
             return Decision(
                 True,
-                _abundant_surplus_for_boost(i, thr),
+                _boost_wanted(i, thr),
                 "manual=solar_only · surplus covers heater",
                 "heat_solar",
             )
@@ -457,7 +489,7 @@ def _decide_impl(i: Inputs, thr: Thresholds) -> Decision:
     # If we're inside the 2h signal hold, we cannot turn off — but boost is
     # still freely toggleable. Pick the best surplus-aware action.
     if _in_signal_hold(i, thr):
-        boost = _abundant_surplus_for_boost(i, thr)
+        boost = _boost_wanted(i, thr)
         elapsed = (i.now - i.signal_on_at).total_seconds() / 60.0  # type: ignore[union-attr]
         # Pick an action label that doesn't lie about the heater being on:
         #   - solar if we have surplus to boost on,
@@ -489,7 +521,7 @@ def _decide_impl(i: Inputs, thr: Thresholds) -> Decision:
         )
         if _surplus_covers_heater(i, thr) and worst_case_ok:
             return Decision(
-                True, _abundant_surplus_for_boost(i, thr),
+                True, _boost_wanted(i, thr),
                 "Rouge HP · solar covers + 2h worst-case blended cap safe",
                 "heat_solar",
             )
@@ -534,9 +566,11 @@ def _decide_impl(i: Inputs, thr: Thresholds) -> Decision:
                 "HP · surplus exists but forecast too low — wait for HC",
                 "wait",
             )
+        boost = _boost_wanted(i, thr)
         return Decision(
-            True, _abundant_surplus_for_boost(i, thr),
-            "HP · solar surplus covers heater",
+            True, boost,
+            "HP · solar surplus covers heater"
+            + (f" · boost {thr.boost_target_c:.0f}°C (#{i.boosts_today + 1} today)" if boost else ""),
             "heat_solar",
         )
 

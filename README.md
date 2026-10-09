@@ -60,6 +60,11 @@ Under a single device "Smart DHWP":
    morning floor at 06:00). The 03:30 cycle is the last one that ends in HC.
 4. **HP window, non-Rouge**: solar surplus + sunny forecast ⇒ on.
    Surplus + cloudy forecast ⇒ wait for HC.
+
+**Solar boost (55 °C)**: when export has exceeded the heater draw by
+1200 W for 10 min, the cycle starts in boost — once a day while the tank
+middle is ≤ 54 °C (even if it's otherwise "full"), again only if it
+drops below 45 °C. Boost is fixed for the whole cycle.
 5. Otherwise off.
 
 ## Setup

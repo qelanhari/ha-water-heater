@@ -68,7 +68,7 @@ from .const import (
     UPDATE_INTERVAL_SECONDS,
 )
 from .cost import CycleAccumulator, accumulate, blended_cost_eur_per_kwh
-from .decision import Decision, Inputs, Thresholds, decide
+from .decision import Decision, Inputs, Thresholds, abundant_surplus_for_boost, decide
 from .pattern import PatternState, expected_kwh_for_day, update_pattern
 from .thermo import energy_budget_until_morning_kwh
 
@@ -112,6 +112,13 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._daily_outdoor_sum: float = 0.0
         self._daily_outdoor_count: int = 0
         self._force_skim: bool = False     # one-shot "force heat now" button
+        # Daily solar boost: engagements since midnight (persisted) and the
+        # start of the current abundant-surplus streak (not persisted).
+        self._boosts_today: int = 0
+        self._abundant_since: datetime | None = None
+        # Last boost value we wrote, so a just-requested boost counts as
+        # active before Cozytouch reflects it on the number entity.
+        self._boost_requested: bool = False
 
         # Last computed decision
         self._last_decision: Decision = Decision(
@@ -248,6 +255,7 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._today_date = None
         self._daily_outdoor_sum = float(data.get("daily_outdoor_sum", 0.0))
         self._daily_outdoor_count = int(data.get("daily_outdoor_count", 0))
+        self._boosts_today = int(data.get("boosts_today", 0))
         self._signal_on_at = _parse_iso(data.get("signal_on_at"))
         last_target = data.get("last_applied_target_c")
         if last_target is not None:
@@ -275,6 +283,7 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "today_date": self._today_date.isoformat() if self._today_date else None,
                 "daily_outdoor_sum": self._daily_outdoor_sum,
                 "daily_outdoor_count": self._daily_outdoor_count,
+                "boosts_today": self._boosts_today,
                 "signal_on_at": _to_iso(self._signal_on_at),
                 "last_applied_target_c": self._last_applied_target_c,
                 "last_known_switch_state": self._last_known_switch_state,
@@ -433,6 +442,11 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except (TypeError, ValueError):
             actual_boost_on = False
+        if actual_signal_on and self._boost_requested:
+            actual_boost_on = True
+
+        thresholds = self.thresholds
+        abundant_min = self._abundant_surplus_minutes(heater_total_w, thresholds, now)
 
         inputs = Inputs(
             now=now,
@@ -454,8 +468,10 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             signal_on_at=self._signal_on_at,
             signal_currently_on=actual_signal_on,
             boost_currently_on=actual_boost_on,
+            boosts_today=self._boosts_today,
+            abundant_surplus_minutes=abundant_min,
         )
-        decision = decide(inputs, self.thresholds)
+        decision = decide(inputs, thresholds)
         self._last_decision = decision
 
         # Apply both controls. signal_switch respects min-dwell; boost is
@@ -485,6 +501,19 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _abundant_surplus_minutes(
+        self, heater_w: float, thr: Thresholds, now: datetime,
+    ) -> float:
+        """Minutes the boost-level surplus has held continuously."""
+        if self._grid_smooth_w is None or not abundant_surplus_for_boost(
+            self._grid_smooth_w, heater_w, thr,
+        ):
+            self._abundant_since = None
+            return 0.0
+        if self._abundant_since is None:
+            self._abundant_since = now
+        return (now - self._abundant_since).total_seconds() / 60.0
 
     def _hours_to_next_morning(self, local_now: datetime) -> float:
         hh = int(self._cfg(CONF_MORNING_DEADLINE_HOUR, DEFAULT_MORNING_DEADLINE_HOUR))
@@ -592,6 +621,9 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not bd_id:
             return
         desired = float(DEFAULT_BOOST_DURATION_DAYS) if boost_on else 0.0
+        if boost_on and not self._boost_requested:
+            self._boosts_today += 1
+        self._boost_requested = boost_on
         current_raw = self._get_state(bd_id)
         try:
             current_val = float(current_raw) if current_raw not in (None, "unknown", "unavailable") else None
@@ -637,6 +669,7 @@ class SmartDhwpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._today_date = None
         self._daily_outdoor_sum = 0.0
         self._daily_outdoor_count = 0
+        self._boosts_today = 0
 
     # ------------------------------------------------------------------
     # Data payload for entities
